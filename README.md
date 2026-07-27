@@ -6,11 +6,20 @@ This project scrapes the Pennsylvania state health department's website every da
 
 The GitHub Action runs daily at 5:05pm ET:
 
-1. **Scraper** fetches the DOH measles page and compares published totals against `measles_daily.tsv`
+1. Scraper fetches the DOH measles page and compares published totals against `measles_daily.tsv`
 2. If cases have increased, new delta rows are appended to `measles_daily.tsv`
 3. `measles_weekly.tsv` is synced: `new_cases` is refreshed from `measles_daily.tsv`'s scrape-date rollup for every week except ones flagged `adjusted`, then the DOH dashboard's cumulative hospitalization total is diffed against prior weeks to fill in the current week's `hospitalizations`
 
 You can also trigger it manually: **Actions → Scrape → Run workflow**
+
+## Output
+
+- `data/measles_daily.tsv` — one row per scraped delta: date observed,
+  county, new case count, source, and which outbreak (`1` for
+  January–March, `2` for the current April–present outbreak) it belongs to.
+- `data/measles_weekly.tsv` — one row per week: new cases and statewide
+  hospitalizations, plus an `adjusted` flag for any hand-corrected week and
+  a free-text `note` explaining it (see "Known data gaps").
 
 ## Known data gaps
 
@@ -28,11 +37,11 @@ That lump sum would otherwise throw off the weekly/cumulative chart, showing
 one artificial 38-case spike in the week of 2026-07-24. Since PA DOH
 separately reported 29 new cases in the 7 days before 2026-07-24, we
 hand-corrected two rows in `data/measles_weekly.tsv` and flagged them
-`adjusted` (see "Weekly tracking" below) so the scraper never overwrites
-them — splitting that one gap into 9 cases (week of 2026-07-13) and 29
-cases (week of 2026-07-20). Flag a row `adjusted` any time a similar gap
-needs correcting — it'll persist across scrape runs instead of being
-synced back to the (wrong) daily-rollup figure.
+`adjusted` — splitting that one gap into 9 cases (week of 2026-07-13) and 29
+cases (week of 2026-07-20). The scraper skips re-syncing `new_cases` for any
+week flagged `adjusted`, so a correction like this sticks permanently
+instead of getting overwritten by the (wrong) daily-rollup figure on the
+next run — flag a row `adjusted` any time a similar gap needs correcting.
 
 Separately, the Power BI report dropped its "January – March" (prior
 outbreak) table sometime around 2026-07-24, presumably because that
@@ -42,56 +51,11 @@ current, April–present outbreak). That's expected and not a bug; the prior
 outbreak's already-recorded 12 cases in `measles_daily.tsv` remain accurate
 and just won't get touched again.
 
-## Daily tracking
-
-`data/measles_daily.tsv` is the source-of-truth delta log everything else is
-derived from — one row per scraped increase, never edited by hand. Columns:
-
-- **`date`** — the date the delta was scraped (i.e. when the increase was
-  observed), not necessarily when the cases were actually confirmed. Blank
-  for the handful of earliest rows, which are manually-entered baseline
-  figures from before this repo started scraping rather than scraper output.
-- **`new_cases`** — how many *new* cases this row adds for that county and
-  outbreak, relative to the running total the scraper had previously seen.
-  Each row is a delta, not a cumulative count — sum a county's rows to get
-  its total.
-- **`county`** — the PA county the cases were confirmed in.
-- **`source`** — where the number came from: `"Scrape of PDOH measles
-  webpage"` for scraper-generated rows, a specific URL for a few early rows
-  added manually from news coverage, or blank for the baseline rows above.
-- **`outbreak`** — which of the two distinct 2026 outbreaks this delta
-  belongs to: `1` for the earlier outbreak (January–March, contained), `2`
-  for the current, ongoing outbreak (April–present, centered in Lancaster
-  and Lebanon counties). See "Known data gaps" above for how the Power BI
-  report distinguishes the two.
-
-## Weekly tracking
-
-`data/measles_weekly.tsv` is the full, authoritative weekly record — one
-row per week going back to 2026-04-20 (the outbreak's first week). Columns:
-
-- **`week_start`** — the Monday that week begins (ISO date).
-- **`new_cases`** — refreshed from `measles_daily.tsv`'s scrape-date rollup
-  on every run, for every week. The exception is any week with `adjusted`
-  set to `TRUE`: the scraper leaves `new_cases` alone for those and never
-  overwrites it, so a hand correction (e.g. for a lump-sum catch-up delta
-  landing in the wrong week — see "Known data gaps" above) sticks
-  permanently instead of getting synced back to the wrong daily-rollup
-  figure. Set `adjusted` to `TRUE` whenever you hand-edit a week's
-  `new_cases`.
-- **`hospitalizations`** — statewide cumulative hospitalizations aren't
-  reported by county or by day, only as a running year-to-date total on the
-  DOH dashboard's "Hospitalized" card. Each scrape run reads that total and
-  derives *this week's* new hospitalizations by subtracting the sum of
-  every other week already recorded here, then writes the result back into
-  the current week's row — the same delta approach used for daily case
-  counts, just applied weekly and statewide instead of daily and
-  per-county. Tracking started the week of 2026-07-20 (the first row with a
-  non-blank value), so every earlier week is blank/unknown rather than
-  zero — there's no way to know how the current cumulative total was
-  distributed across weeks before we started capturing it.
-- **`note`** — free-text, blank unless something about that week needed
-  explaining (mainly used to document `adjusted` corrections).
+Statewide hospitalization tracking in `measles_weekly.tsv` didn't start
+until the week of 2026-07-20 (the first week with a non-blank
+`hospitalizations` value) — every earlier week is blank/unknown rather than
+zero, since there's no way to know how the cumulative total DOH reports was
+distributed across weeks before we started capturing it.
 
 ## Repo structure
 
@@ -101,7 +65,7 @@ measles-tracker/
 │   └── measles_scraper.R      # Scrapes DOH page, updates the TSVs
 ├── data/
 │   ├── measles_daily.tsv      # One row per scraped delta (county, outbreak, date)
-│   └── measles_weekly.tsv     # One row per week: manual case-count corrections + scraped hospitalizations — see "Weekly tracking"
+│   └── measles_weekly.tsv     # One row per week: case counts + hospitalizations — see "Output"
 └── .github/
     └── workflows/
         └── scrape.yml
