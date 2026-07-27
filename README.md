@@ -42,12 +42,35 @@ current, April–present outbreak). That's expected and not a bug; the prior
 outbreak's already-recorded 12 cases in `measles_daily.tsv` remain accurate
 and just won't get touched again.
 
+## Daily tracking
+
+`data/measles_daily.tsv` is the source-of-truth delta log everything else is
+derived from — one row per scraped increase, never edited by hand. Columns:
+
+- **`date`** — the date the delta was scraped (i.e. when the increase was
+  observed), not necessarily when the cases were actually confirmed. Blank
+  for the handful of earliest rows, which are manually-entered baseline
+  figures from before this repo started scraping rather than scraper output.
+- **`new_cases`** — how many *new* cases this row adds for that county and
+  outbreak, relative to the running total the scraper had previously seen.
+  Each row is a delta, not a cumulative count — sum a county's rows to get
+  its total.
+- **`county`** — the PA county the cases were confirmed in.
+- **`source`** — where the number came from: `"Scrape of PDOH measles
+  webpage"` for scraper-generated rows, a specific URL for a few early rows
+  added manually from news coverage, or blank for the baseline rows above.
+- **`outbreak`** — which of the two distinct 2026 outbreaks this delta
+  belongs to: `1` for the earlier outbreak (January–March, contained), `2`
+  for the current, ongoing outbreak (April–present, centered in Lancaster
+  and Lebanon counties). See "Known data gaps" above for how the Power BI
+  report distinguishes the two.
+
 ## Weekly tracking
 
 `data/measles_weekly.tsv` is the full, authoritative weekly record — one
-row per week going back to 2026-04-20 (the outbreak's first week). It has
-two independently maintained columns:
+row per week going back to 2026-04-20 (the outbreak's first week). Columns:
 
+- **`week_start`** — the Monday that week begins (ISO date).
 - **`new_cases`** — refreshed from `measles_daily.tsv`'s scrape-date rollup
   on every run, for every week. The exception is any week with `adjusted`
   set to `TRUE`: the scraper leaves `new_cases` alone for those and never
@@ -67,6 +90,8 @@ two independently maintained columns:
   non-blank value), so every earlier week is blank/unknown rather than
   zero — there's no way to know how the current cumulative total was
   distributed across weeks before we started capturing it.
+- **`note`** — free-text, blank unless something about that week needed
+  explaining (mainly used to document `adjusted` corrections).
 
 ## Repo structure
 
