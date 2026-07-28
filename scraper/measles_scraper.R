@@ -173,6 +173,46 @@ pbi_post <- function(url, resource_key, body) {
     pbi_perform(url)
 }
 
+# A visual's `map` filter value normally shows up in its own `query`'s Where
+# clause, but Power BI sometimes ships a visual with an empty `query` (its
+# filter state lives only in `filters` in that case) — check both.
+extract_map_value <- function(vc) {
+  query_json <- tryCatch(fromJSON(vc$query, simplifyVector = FALSE), error = function(e) NULL)
+  where <- query_json$Commands[[1]]$SemanticQueryDataShapeCommand$Query$Where
+  for (w in where) {
+    cond <- w$Condition$In
+    if (is.null(cond)) next
+    if (!identical(cond$Expressions[[1]]$Column$Property, "map")) next
+    return(str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'"))
+  }
+
+  filters <- tryCatch(fromJSON(vc$filters, simplifyVector = FALSE), error = function(e) NULL)
+  for (f in filters) {
+    if (!identical(tryCatch(f$expression$Column$Property, error = function(e) NULL), "map")) next
+    cond <- tryCatch(f$filter$Where[[1]]$Condition$In, error = function(e) NULL)
+    if (is.null(cond)) next
+    return(str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'"))
+  }
+
+  NULL
+}
+
+# Clone a working visual's query, swapping its `map` Where-filter literal for
+# a different map value — used to query visuals whose own `query` is empty
+# (see extract_map_value()) since they share the same Select/entity shape.
+build_query_for_map_value <- function(template_query, map_value) {
+  q <- fromJSON(template_query, simplifyVector = FALSE)
+  where <- q$Commands[[1]]$SemanticQueryDataShapeCommand$Query$Where
+  for (i in seq_along(where)) {
+    cond <- where[[i]]$Condition$In
+    if (is.null(cond)) next
+    if (!identical(cond$Expressions[[1]]$Column$Property, "map")) next
+    q$Commands[[1]]$SemanticQueryDataShapeCommand$Query$Where[[i]]$
+      Condition$In$Values[[1]][[1]]$Literal$Value <- paste0("'", map_value, "'")
+  }
+  toJSON(q, auto_unbox = TRUE)
+}
+
 # Find every tableEx visual, anywhere in the report, that is filtered on a
 # `map` field — these are the county/case-count tables backing each map.
 find_county_map_visuals <- function(exploration) {
@@ -184,21 +224,13 @@ find_county_map_visuals <- function(exploration) {
       sv  <- cfg$singleVisual
       if (is.null(sv) || !identical(sv$visualType, "tableEx")) next
 
-      query_json <- tryCatch(fromJSON(vc$query, simplifyVector = FALSE), error = function(e) NULL)
-      where <- query_json$Commands[[1]]$SemanticQueryDataShapeCommand$Query$Where
-      if (is.null(where)) next
+      map_value <- extract_map_value(vc)
+      if (is.null(map_value)) next
 
-      for (w in where) {
-        cond <- w$Condition$In
-        if (is.null(cond)) next
-        prop <- cond$Expressions[[1]]$Column$Property
-        if (!identical(prop, "map")) next
-        map_value <- str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'")
-        # `vc$id` (numeric) is what the querydata API wants as VisualId, but
-        # bookmarks reference visuals by `cfg$name` (a hash-like string) —
-        # keep both.
-        vc_map[[map_value]] <- list(id = vc$id, name = cfg$name, query = vc$query)
-      }
+      # `vc$id` (numeric) is what the querydata API wants as VisualId, but
+      # bookmarks reference visuals by `cfg$name` (a hash-like string) —
+      # keep both.
+      vc_map[[map_value]] <- list(id = vc$id, name = cfg$name, query = vc$query)
     }
   }
 
@@ -207,6 +239,24 @@ find_county_map_visuals <- function(exploration) {
       "No county case-count table visuals found in the Power BI report. ",
       "The dashboard layout may have changed — check the embed or update parse_cases()."
     )
+  }
+
+  # Some visuals' `query` may be empty (see extract_map_value()) — fill those
+  # in from any sibling visual that does have one, since they share the same
+  # Select/entity shape and only differ in their `map` filter value.
+  template_query <- NULL
+  for (v in vc_map) {
+    if (!is.null(v$query) && nchar(v$query) > 0) {
+      template_query <- v$query
+      break
+    }
+  }
+  if (!is.null(template_query)) {
+    for (map_value in names(vc_map)) {
+      if (is.null(vc_map[[map_value]]$query) || nchar(vc_map[[map_value]]$query) == 0) {
+        vc_map[[map_value]]$query <- build_query_for_map_value(template_query, map_value)
+      }
+    }
   }
 
   vc_map
