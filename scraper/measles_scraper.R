@@ -31,6 +31,9 @@ SOURCE_URL          <- "https://www.pa.gov/agencies/health/diseases-conditions/i
 DEFAULT_TSV         <- "data/measles_daily.tsv"
 WEEKLY_TSV          <- "data/measles_weekly.tsv"
 TSV_COLS            <- c("date", "new_cases", "county", "source", "outbreak")
+BAR_EMBED_HTML      <- "visualizations/bar-embed.html"
+MAP_EMBED_HTML      <- "visualizations/map-embed.html"
+WEEKLY_EMBED_HTML   <- "visualizations/weekly-embed.html"
 
 UA_STRING <- paste0(
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
@@ -658,6 +661,82 @@ build_new_rows <- function(snapshot, existing) {
 }
 
 # ---------------------------------------------------------------------------
+# Update the standalone embed HTML files (bar-embed.html, map-embed.html,
+# weekly-embed.html) — each is a self-contained page meant to be hosted at a
+# stable URL and iframed into the CMS. Rather than a dashboard reading a
+# shared data.json at runtime, every embed keeps its data inlined as JS
+# constants between a pair of marker comments, and this scraper rewrites
+# just that block in place on every run — so each embed stays a single,
+# fully self-contained file with nothing else to fetch or cache. See README.
+# ---------------------------------------------------------------------------
+
+# Replace the JS between the "/* SCRAPER-DATA-START */" and
+# "/* SCRAPER-DATA-END */" markers in an embed file with freshly generated
+# lines, leaving the surrounding markup/styling/chart code untouched.
+inject_embed_data <- function(path, js_lines) {
+  lines     <- readLines(path, warn = FALSE)
+  start_idx <- which(str_detect(lines, fixed("SCRAPER-DATA-START")))
+  end_idx   <- which(str_detect(lines, fixed("SCRAPER-DATA-END")))
+
+  if (length(start_idx) != 1 || length(end_idx) != 1 || end_idx <= start_idx) {
+    stop("Could not find a single SCRAPER-DATA marker pair in '", path, "'")
+  }
+
+  updated <- c(lines[seq_len(start_idx)], js_lines, lines[end_idx:length(lines)])
+  writeLines(updated, path)
+  message("Updated embed data in '", path, "'")
+}
+
+# Per-county ob1/ob2/total, mirroring the map's caseData shape.
+compute_case_data <- function(daily_df) {
+  daily_df |>
+    group_by(county, outbreak) |>
+    summarise(total_cases = sum(new_cases, na.rm = TRUE), .groups = "drop") |>
+    group_by(county) |>
+    summarise(
+      ob1   = sum(total_cases[outbreak == 1], na.rm = TRUE),
+      ob2   = sum(total_cases[outbreak == 2], na.rm = TRUE),
+      total = sum(total_cases, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    arrange(county)
+}
+
+update_bar_embed <- function(total_cases, path) {
+  inject_embed_data(path, sprintf("  const totalCases = %d;", total_cases))
+}
+
+update_map_embed <- function(case_data, total_cases, current_ob, prior_ob, last_updated, path) {
+  entries <- sprintf(
+    '  "%s": { ob1: %d, ob2: %d }',
+    case_data$county, case_data$ob1, case_data$ob2
+  )
+  entries[-length(entries)] <- paste0(entries[-length(entries)], ",")
+
+  js_lines <- c(
+    sprintf("  const totalCases = %d;", total_cases),
+    sprintf("  const currentOb = %d;", current_ob),
+    sprintf("  const priorOb = %d;", prior_ob),
+    sprintf('  const lastUpdated = "%s";', last_updated),
+    "  const caseData = {",
+    entries,
+    "  };"
+  )
+  inject_embed_data(path, js_lines)
+}
+
+update_weekly_embed <- function(weekly, path) {
+  entries <- sprintf(
+    '    { week_start: "%s", new_cases: %d, cumulative_cases: %d },',
+    weekly$week_start, coalesce(weekly$new_cases, 0L), weekly$cumulative_cases
+  )
+  entries[length(entries)] <- str_remove(entries[length(entries)], ",$")
+
+  js_lines <- c("  const weeklyData = [", entries, "  ];")
+  inject_embed_data(path, js_lines)
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -695,6 +774,30 @@ tryCatch({
   })
 
   save_weekly_tsv(weekly_tsv, WEEKLY_TSV)
+
+  # The embed HTML files aren't checked into the repo yet (visualizations/ is
+  # still gitignored while that feature is in progress) — skip updating them
+  # rather than failing the run when they're not present.
+  if (all(file.exists(c(BAR_EMBED_HTML, MAP_EMBED_HTML, WEEKLY_EMBED_HTML)))) {
+    case_data        <- compute_case_data(updated)
+    total_cases      <- sum(case_data$total)
+    current_outbreak <- sum(case_data$ob2)
+    prior_outbreak   <- sum(case_data$ob1)
+    last_updated     <- format(Sys.Date(), "%B %e, %Y") |> trimws()
+
+    update_bar_embed(total_cases, BAR_EMBED_HTML)
+    update_map_embed(case_data, total_cases, current_outbreak, prior_outbreak, last_updated, MAP_EMBED_HTML)
+
+    weekly_for_embed <- weekly_tsv |>
+      arrange(week_start) |>
+      mutate(cumulative_cases = cumsum(coalesce(new_cases, 0L)))
+    update_weekly_embed(weekly_for_embed, WEEKLY_EMBED_HTML)
+
+    message(sprintf(
+      "Updated embeds — %d total cases across %d counties (as of %s)",
+      total_cases, nrow(filter(case_data, total > 0)), last_updated
+    ))
+  }
 },
 error = function(e) {
   message("ERROR: Scrape job failed: ", conditionMessage(e))
