@@ -13,4 +13,4 @@ week_start	new_cases	adjusted	hospitalizations	note
 2026-07-06	12			
 2026-07-13	9	TRUE		Manual adjustment — scraper outage 2026-07-08 to 2026-07-24 lumped the whole gap under one 2026-07-24 delta; split using PDOH's separately reported '29 cases in the last 7 days' figure. See README.
 2026-07-20	29	TRUE	25	Manual adjustment — see note on 2026-07-13 row above and README. Hospitalizations tracking begins this week — see README.
-2026-07-27	19		3	
+2026-07-27	28		7	
