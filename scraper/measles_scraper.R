@@ -31,9 +31,10 @@ SOURCE_URL          <- "https://www.pa.gov/agencies/health/diseases-conditions/i
 DEFAULT_TSV         <- "data/measles_daily.tsv"
 WEEKLY_TSV          <- "data/measles_weekly.tsv"
 TSV_COLS            <- c("date", "new_cases", "county", "source", "outbreak")
-BAR_EMBED_HTML      <- "visualizations/bar-embed.html"
-MAP_EMBED_HTML      <- "visualizations/map-embed.html"
-WEEKLY_EMBED_HTML   <- "visualizations/weekly-embed.html"
+BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
+MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
+MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
+WEEKLY_EMBED_HTML   <- "visualizations/weekly-trend-embed.html"
 
 UA_STRING <- paste0(
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
@@ -661,8 +662,9 @@ build_new_rows <- function(snapshot, existing) {
 }
 
 # ---------------------------------------------------------------------------
-# Update the standalone embed HTML files (bar-embed.html, map-embed.html,
-# weekly-embed.html) — each is a self-contained page meant to be hosted at a
+# Update the standalone embed HTML files (cases-by-year-embed.html,
+# map-by-outbreak-embed.html, map-combined-embed.html, weekly-trend-embed.html)
+# — each is a self-contained page meant to be hosted at a
 # stable URL and iframed into the CMS. Rather than a dashboard reading a
 # shared data.json at runtime, every embed keeps its data inlined as JS
 # constants between a pair of marker comments, and this scraper rewrites
@@ -725,6 +727,20 @@ update_map_embed <- function(case_data, total_cases, current_ob, prior_ob, last_
   inject_embed_data(path, js_lines)
 }
 
+update_total_map_embed <- function(case_data, total_cases, last_updated, path) {
+  entries <- sprintf('  "%s": %d', case_data$county, case_data$total)
+  entries[-length(entries)] <- paste0(entries[-length(entries)], ",")
+
+  js_lines <- c(
+    sprintf("  const totalCases = %d;", total_cases),
+    sprintf('  const lastUpdated = "%s";', last_updated),
+    "  const caseData = {",
+    entries,
+    "  };"
+  )
+  inject_embed_data(path, js_lines)
+}
+
 update_weekly_embed <- function(weekly, path) {
   entries <- sprintf(
     '    { week_start: "%s", new_cases: %d, cumulative_cases: %d },',
@@ -775,23 +791,32 @@ tryCatch({
 
   save_weekly_tsv(weekly_tsv, WEEKLY_TSV)
 
-  # The embed HTML files aren't checked into the repo yet (visualizations/ is
-  # still gitignored while that feature is in progress) — skip updating them
-  # rather than failing the run when they're not present.
-  if (all(file.exists(c(BAR_EMBED_HTML, MAP_EMBED_HTML, WEEKLY_EMBED_HTML)))) {
+  # Skip updating any embed whose file isn't present, rather than failing
+  # the run — keeps this resilient if an embed is ever removed or renamed.
+  embed_paths <- c(BAR_EMBED_HTML, MAP_EMBED_HTML, MAP_TOTAL_EMBED_HTML, WEEKLY_EMBED_HTML)
+  if (any(file.exists(embed_paths))) {
     case_data        <- compute_case_data(updated)
     total_cases      <- sum(case_data$total)
     current_outbreak <- sum(case_data$ob2)
     prior_outbreak   <- sum(case_data$ob1)
     last_updated     <- format(Sys.Date(), "%B %e, %Y") |> trimws()
 
-    update_bar_embed(total_cases, BAR_EMBED_HTML)
-    update_map_embed(case_data, total_cases, current_outbreak, prior_outbreak, last_updated, MAP_EMBED_HTML)
+    if (file.exists(BAR_EMBED_HTML)) {
+      update_bar_embed(total_cases, BAR_EMBED_HTML)
+    }
+    if (file.exists(MAP_EMBED_HTML)) {
+      update_map_embed(case_data, total_cases, current_outbreak, prior_outbreak, last_updated, MAP_EMBED_HTML)
+    }
+    if (file.exists(MAP_TOTAL_EMBED_HTML)) {
+      update_total_map_embed(case_data, total_cases, last_updated, MAP_TOTAL_EMBED_HTML)
+    }
 
     weekly_for_embed <- weekly_tsv |>
       arrange(week_start) |>
       mutate(cumulative_cases = cumsum(coalesce(new_cases, 0L)))
-    update_weekly_embed(weekly_for_embed, WEEKLY_EMBED_HTML)
+    if (file.exists(WEEKLY_EMBED_HTML)) {
+      update_weekly_embed(weekly_for_embed, WEEKLY_EMBED_HTML)
+    }
 
     message(sprintf(
       "Updated embeds — %d total cases across %d counties (as of %s)",
