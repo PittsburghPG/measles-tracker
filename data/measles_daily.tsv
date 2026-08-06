@@ -1,7 +1,11 @@
 date	new_cases	county	source	outbreak
-	1	Chester		1
-	8	Lancaster		1
-	3	Montgomery		1
+2026-01-30	5	Lancaster	https://www.pa.gov/content/dam/copapwp-pagov/en/health/documents/topics/documents/2026%20HAN/2026-817-2-3-ADV-%20Measles.pdf	1
+2026-02-04	1	Montgomery		1
+2026-02-12	1	Lancaster		1
+2026-02-12	1	Chester		1
+2026-02-24	1	Lancaster		1
+2026-02-24	2	Montgomery		1
+2026-02-26	1	Lancaster		1
 2026-04-23	1	Lebanon	https://www.inquirer.com/health/measles-lebanon-county-pennsylvania-vaccination-rates-20260506.html	2
 2026-04-27	2	Lancaster	https://lancasteronline.com/news/ephrata/2-ephrata-mennonite-school-students-diagnosed-with-measles-have-since-recovered/article_4f7cb1c3-4520-4518-bb6f-2069f2a39e72.html	2
 2026-04-30	2	Lebanon		2
