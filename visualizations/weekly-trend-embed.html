@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weekly measles cases in Pennsylvania</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/*
+ * DATAWRAPPER-STYLE TYPOGRAPHY — applies to all visualizations/ embeds.
+ * Font: Roboto (fallback Arial/sans-serif). Body/annotation/label text
+ * capped at two sizes — 14px primary (near-black), 12px secondary (gray).
+ * Regular weight for body text; bold reserved for titles and emphasis.
+ * Sentence case throughout. See measles_scraper.R comments for source.
+ */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body { background: #fff; }
+
+  #pg-measles-weekly {
+    margin: 0 auto;
+    font-family: 'Roboto', Arial, sans-serif;
+    padding: 16px 0 12px;
+  }
+  .pg-weekly-hed {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin: 0 0 6px;
+  }
+  .pg-weekly-chatter {
+    font-size: 14px;
+    color: #444;
+    line-height: 1.4;
+    margin: 0 0 16px;
+  }
+  .pg-weekly-source {
+    font-size: 12px;
+    color: #888;
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .pg-weekly-dot {
+    font-size: 15px;
+    vertical-align: -1px;
+    margin: 0 1px;
+  }
+  #pg-weekly-tip {
+    display: none;
+    position: fixed;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 8px 12px;
+    font-family: 'Roboto', Arial, sans-serif;
+    font-size: 14px;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    z-index: 100;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div id="pg-measles-weekly">
+  <h2 class="pg-weekly-hed">Outbreak accelerates weeks before schools start</h2>
+  <p class="pg-weekly-chatter">Over just the past seven days, twenty-eight people have tested positive for measles in Pennsylvania, bringing the state's annual total to 167. With children returning to school next month, experts say they are concerned the outbreak will get even worse.</p>
+  <div style="position:relative">
+    <svg id="pg-weekly-svg" style="width:100%;display:block"></svg>
+  </div>
+  <p class="pg-weekly-source">Chart: Jimmy Cloutier / Post-Gazette <span class="pg-weekly-dot">&bull;</span> Source: Pennsylvania Department of Health. Week beginning dates shown. Most recent week may be incomplete.</p>
+</div>
+
+<div id="pg-weekly-tip"></div>
+
+<script>
+(function () {
+  /* SCRAPER-DATA-START */
+  const weeklyData = [
+    { week_start: "2026-01-26", new_cases: 5, cumulative_cases: 5 },
+    { week_start: "2026-02-02", new_cases: 1, cumulative_cases: 6 },
+    { week_start: "2026-02-09", new_cases: 2, cumulative_cases: 8 },
+    { week_start: "2026-02-16", new_cases: 0, cumulative_cases: 8 },
+    { week_start: "2026-02-23", new_cases: 4, cumulative_cases: 12 },
+    { week_start: "2026-03-02", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-03-09", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-03-16", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-03-23", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-03-30", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-04-06", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-04-13", new_cases: 0, cumulative_cases: 12 },
+    { week_start: "2026-04-20", new_cases: 1, cumulative_cases: 13 },
+    { week_start: "2026-04-27", new_cases: 4, cumulative_cases: 17 },
+    { week_start: "2026-05-04", new_cases: 9, cumulative_cases: 26 },
+    { week_start: "2026-05-11", new_cases: 4, cumulative_cases: 30 },
+    { week_start: "2026-05-18", new_cases: 4, cumulative_cases: 34 },
+    { week_start: "2026-05-25", new_cases: 4, cumulative_cases: 38 },
+    { week_start: "2026-06-01", new_cases: 22, cumulative_cases: 60 },
+    { week_start: "2026-06-08", new_cases: 5, cumulative_cases: 65 },
+    { week_start: "2026-06-15", new_cases: 2, cumulative_cases: 67 },
+    { week_start: "2026-06-22", new_cases: 17, cumulative_cases: 84 },
+    { week_start: "2026-06-29", new_cases: 5, cumulative_cases: 89 },
+    { week_start: "2026-07-06", new_cases: 12, cumulative_cases: 101 },
+    { week_start: "2026-07-13", new_cases: 9, cumulative_cases: 110 },
+    { week_start: "2026-07-20", new_cases: 29, cumulative_cases: 139 },
+    { week_start: "2026-07-27", new_cases: 28, cumulative_cases: 167 }
+  ];
+  /* SCRAPER-DATA-END */
+
+  const margin = { top: 24, right: 56, bottom: 32, left: 36 };
+  const container = document.getElementById('pg-measles-weekly');
+  const svgEl = document.getElementById('pg-weekly-svg');
+  const tip = document.getElementById('pg-weekly-tip');
+
+function draw() {
+  // Re-measured on every draw (not just once at load) so the chart
+  // redraws at true size on resize, instead of the browser uniformly
+  // scaling a viewBox frozen at the load-time width — which is what
+  // shrinks all the in-chart text when the window narrows afterward.
+  const totalW = container.getBoundingClientRect().width || 680;
+  const totalH = 220;
+  const w = totalW - margin.left - margin.right;
+  const h = totalH - margin.top - margin.bottom;
+
+  const svg = d3.select(svgEl);
+  svg.selectAll('*').remove();
+  svg
+    .attr('viewBox', `0 0 ${totalW} ${totalH}`)
+    .attr('width', totalW)
+    .attr('height', totalH);
+
+  const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // x-axis is a real time scale (not a category band) so weeks with no
+  // data — like the gap between the January and April outbreaks — show
+  // up as empty space instead of being squeezed out.
+  const parseWeek = s => new Date(s + 'T12:00:00Z');
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  const weekDates = weeklyData.map(d => parseWeek(d.week_start));
+  const domainStart = new Date(d3.min(weekDates).getTime() - msPerWeek * 0.5);
+  const domainEnd   = new Date(d3.max(weekDates).getTime() + msPerWeek * 0.5);
+
+  const x = d3.scaleTime().domain([domainStart, domainEnd]).range([0, w]);
+
+  // Pixel width of one week at the current scale, used to size/center bars.
+  const weekPx = w * msPerWeek / (domainEnd - domainStart);
+  const barWidth = weekPx * 0.65;
+  const barX = d => x(parseWeek(d.week_start)) - barWidth / 2;
+  const centerX = d => x(parseWeek(d.week_start));
+
+  const maxY = d3.max(weeklyData, d => d.cumulative_cases);
+  const y = d3.scaleLinear().domain([0, Math.ceil(maxY * 1.12)]).range([h, 0]);
+
+  // Grid + y-axis
+  g.append('g').call(d3.axisLeft(y).ticks(4))
+    .call(ax => ax.select('.domain').remove())
+    .call(ax => ax.selectAll('line').attr('stroke', '#eee').attr('stroke-dasharray', '2,2').attr('x2', w))
+    .call(ax => ax.selectAll('text').attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#888'));
+
+  // "Jan 26" style formatter — still used for tooltips, even though the
+  // axis itself now shows month names rather than individual dates.
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtWeek = d => `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+
+  // x-axis: AP-style month labels — abbreviated for longer names (Jan,
+  // Feb), spelled out for short ones (March, April, May, June, July) —
+  // each centered under its own month's span, plus small unlabeled tick
+  // marks at each week for visual rhythm. Matches the newsroom's standard
+  // axis style rather than labeling individual dates.
+  const apMonths = ['Jan','Feb','March','April','May','June','July','Aug','Sept','Oct','Nov','Dec'];
+
+  // Minor weekly tick marks — no text, just a short mark per week.
+  g.append('g').attr('transform', `translate(0,${h})`)
+    .call(d3.axisBottom(x).tickValues(weekDates).tickFormat('').tickSize(5))
+    .call(ax => ax.select('.domain').attr('stroke', '#ccc'))
+    .call(ax => ax.selectAll('line').attr('stroke', '#ccc'));
+
+  // Major month labels, centered on each month's span as clipped to the
+  // visible domain — independent of any single tick position, so a
+  // partial first/last month still centers correctly within its
+  // (shorter) visible slice. Month *boundaries* (the transitions between
+  // consecutive months, not the very first/last edge) get a taller
+  // divider line than the weekly ticks, to visually separate months —
+  // matching the reference chart's look.
+  // A raw calendar month-start rarely lines up with a week boundary, so
+  // snapping a divider there would cut straight through whichever bar
+  // happens to sit at that date. Instead, each divider is placed at the
+  // midpoint between the two weeks it falls between — which is exactly
+  // where the natural gap between two adjacent bars already is.
+  const boundaryBetweenWeeks = target => {
+    for (let i = 0; i < weekDates.length - 1; i++) {
+      if (weekDates[i] <= target && target < weekDates[i + 1]) {
+        return new Date((weekDates[i].getTime() + weekDates[i + 1].getTime()) / 2);
+      }
+    }
+    return target < weekDates[0] ? weekDates[0] : weekDates[weekDates.length - 1];
+  };
+
+  const monthSpans = [];
+  const monthBoundaries = [];
+  let curMonth = new Date(Date.UTC(domainStart.getUTCFullYear(), domainStart.getUTCMonth(), 1));
+  let isFirstMonth = true;
+  while (curMonth < domainEnd) {
+    if (!isFirstMonth) monthBoundaries.push(boundaryBetweenWeeks(curMonth));
+    isFirstMonth = false;
+    const nextMonth = new Date(Date.UTC(curMonth.getUTCFullYear(), curMonth.getUTCMonth() + 1, 1));
+    const spanStart = curMonth < domainStart ? domainStart : curMonth;
+    const spanEnd = nextMonth > domainEnd ? domainEnd : nextMonth;
+    monthSpans.push({ month: curMonth.getUTCMonth(), center: new Date((spanStart.getTime() + spanEnd.getTime()) / 2) });
+    curMonth = nextMonth;
+  }
+
+  g.selectAll('.month-boundary').data(monthBoundaries).join('line')
+    .attr('class', 'month-boundary')
+    .attr('x1', d => x(d)).attr('x2', d => x(d))
+    .attr('y1', h).attr('y2', h + 18)
+    .attr('stroke', '#ccc');
+
+  const monthLabels = g.selectAll('.month-label').data(monthSpans).join('text')
+    .attr('class', 'month-label')
+    .attr('x', d => x(d.center))
+    .attr('y', h + 22)
+    .attr('text-anchor', 'middle')
+    .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#888')
+    .text(d => apMonths[d.month]);
+
+  // Safety pass: drop a month label if it would still collide with a
+  // kept neighbor (rare with ~4 weeks between months, but a narrow
+  // embed could squeeze two adjacent short months together). First and
+  // last are always kept.
+  const monthNodes = monthLabels.nodes();
+  if (monthNodes.length > 0) {
+    const keep = new Set([0, monthNodes.length - 1]);
+    let lastRight = monthNodes[0].getBBox().x + monthNodes[0].getBBox().width;
+    for (let i = 1; i < monthNodes.length - 1; i++) {
+      const bbox = monthNodes[i].getBBox();
+      if (bbox.x > lastRight + 4) {
+        keep.add(i);
+        lastRight = bbox.x + bbox.width;
+      }
+    }
+    const lastBBox = monthNodes[monthNodes.length - 1].getBBox();
+    for (let i = monthNodes.length - 2; i > 0; i--) {
+      if (!keep.has(i)) continue;
+      const bbox = monthNodes[i].getBBox();
+      if (bbox.x + bbox.width > lastBBox.x - 4) {
+        keep.delete(i);
+      } else {
+        break;
+      }
+    }
+    monthNodes.forEach((node, i) => { if (!keep.has(i)) d3.select(node).remove(); });
+  }
+
+  // Bars — weekly new cases
+  g.selectAll('.wbar').data(weeklyData).join('rect')
+    .attr('class', 'wbar')
+    .attr('x', barX).attr('y', d => y(d.new_cases))
+    .attr('width', barWidth).attr('height', d => h - y(d.new_cases))
+    .attr('fill', '#a93226').attr('opacity', 0.75)
+    .style('cursor', 'pointer')
+    .on('mouseover', function (event, d) {
+      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.new_cases} new case${d.new_cases !== 1 ? 's' : ''}<br>${d.cumulative_cases} cumulative`;
+      tip.style.display = 'block';
+    })
+    .on('mousemove', function (event) {
+      tip.style.left = (event.clientX + 12) + 'px';
+      tip.style.top  = (event.clientY - 10) + 'px';
+    })
+    .on('mouseout', function () {
+      tip.style.display = 'none';
+    });
+
+  // Bar value labels — bars are chronological left-to-right, so a greedy
+  // left-to-right pass (drop a label if it would overlap the last one we
+  // kept) is enough to prevent collisions on narrow (mobile) widths
+  // without shrinking text below the style guide's 12px floor. The most
+  // recent week's label is always kept — it's the chart's headline number.
+  const barLabels = g.selectAll('.wbar-label').data(weeklyData.filter(d => d.new_cases > 0)).join('text')
+    .attr('class', 'wbar-label')
+    .attr('x', centerX)
+    .attr('y', d => y(d.new_cases) - 4)
+    .attr('text-anchor', 'middle')
+    .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#a93226').attr('font-weight', '700')
+    .text(d => d.new_cases);
+
+  const barLabelNodes = barLabels.nodes();
+  if (barLabelNodes.length > 0) {
+    let lastRight = barLabelNodes[0].getBBox().x + barLabelNodes[0].getBBox().width;
+    for (let i = 1; i < barLabelNodes.length - 1; i++) {
+      const bbox = barLabelNodes[i].getBBox();
+      if (bbox.x < lastRight + 2) {
+        d3.select(barLabelNodes[i]).remove();
+      } else {
+        lastRight = bbox.x + bbox.width;
+      }
+    }
+    if (barLabelNodes.length > 1) {
+      const last = barLabelNodes[barLabelNodes.length - 1];
+      const lastBBox = last.getBBox();
+      // Drop the second-to-last kept label instead if it would collide
+      // with the guaranteed-last one.
+      for (let i = barLabelNodes.length - 2; i >= 0; i--) {
+        const node = barLabelNodes[i];
+        if (!node.isConnected) continue;
+        const bbox = node.getBBox();
+        if (bbox.x + bbox.width > lastBBox.x - 2) {
+          d3.select(node).remove();
+        }
+        break;
+      }
+    }
+  }
+
+  // Cumulative line
+  const line = d3.line()
+    .x(centerX)
+    .y(d => y(d.cumulative_cases))
+    .curve(d3.curveMonotoneX);
+
+  g.append('path').datum(weeklyData)
+    .attr('fill', 'none').attr('stroke', '#1a1a1a').attr('stroke-width', 2)
+    .attr('d', line);
+
+  // Dots on cumulative line
+  g.selectAll('.wdot').data(weeklyData).join('circle')
+    .attr('class', 'wdot')
+    .attr('cx', centerX)
+    .attr('cy', d => y(d.cumulative_cases))
+    .attr('r', 3).attr('fill', '#1a1a1a');
+
+  // Larger invisible hit targets on the dots — a 3px dot is too small to
+  // hover reliably, so the tooltip trigger is an 8px transparent circle
+  // centered on the same point.
+  g.selectAll('.wdot-hit').data(weeklyData).join('circle')
+    .attr('class', 'wdot-hit')
+    .attr('cx', centerX)
+    .attr('cy', d => y(d.cumulative_cases))
+    .attr('r', 8).attr('fill', 'transparent')
+    .style('cursor', 'pointer')
+    .on('mouseover', function (event, d) {
+      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.cumulative_cases} cumulative case${d.cumulative_cases !== 1 ? 's' : ''}<br>${d.new_cases} new that week`;
+      tip.style.display = 'block';
+    })
+    .on('mousemove', function (event) {
+      tip.style.left = (event.clientX + 12) + 'px';
+      tip.style.top  = (event.clientY - 10) + 'px';
+    })
+    .on('mouseout', function () {
+      tip.style.display = 'none';
+    });
+
+  // Final cumulative label
+  const last = weeklyData[weeklyData.length - 1];
+  g.append('text')
+    .attr('x', centerX(last) + 6)
+    .attr('y', y(last.cumulative_cases) + 4)
+    .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px')
+    .attr('font-weight', '700').attr('fill', '#1a1a1a')
+    .text(last.cumulative_cases);
+
+  // Legend — aligned to x=0 (the SVG's left edge), matching the head/chatter
+  // text above it, rather than the plot area's margin.left inset.
+  const legend = svg.append('g').attr('transform', 'translate(0, 6)');
+  legend.append('rect').attr('width', 10).attr('height', 10).attr('y', 1).attr('fill', '#a93226').attr('opacity', 0.75);
+  legend.append('text').attr('x', 14).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Weekly new cases');
+  legend.append('line').attr('x1', 120).attr('x2', 132).attr('y1', 6).attr('y2', 6).attr('stroke', '#1a1a1a').attr('stroke-width', 2);
+  legend.append('circle').attr('cx', 126).attr('cy', 6).attr('r', 3).attr('fill', '#1a1a1a');
+  legend.append('text').attr('x', 136).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Cumulative cases');
+}
+
+// Tells the parent frame our true content height, in case it's set up
+// to listen (e.g. an iframe-auto-resize script) — a harmless no-op
+// otherwise. Without a listener on the host page, the iframe's height
+// still has to be set manually to match.
+function reportHeight() {
+  if (window.parent !== window) {
+    window.parent.postMessage(
+      { type: 'pg-measles-embed-resize', height: container.getBoundingClientRect().height },
+      '*'
+    );
+  }
+}
+
+draw();
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(draw, 150);
+});
+
+// A ResizeObserver keeps the parent frame's height in sync with ANY
+// change to the chart's actual size, not just a one-time report right
+// after load — this covers timing races a single postMessage call
+// misses, like a web font finishing its swap (and reflowing text)
+// after the chart's first paint.
+new ResizeObserver(reportHeight).observe(container);
+
+// Belt-and-braces on top of the ResizeObserver: re-send the height on a
+// plain timer for the first few seconds after load, the same way
+// production embed libraries (Datawrapper's included) do — a backstop
+// against any timing race regardless of its exact cause.
+let reportTries = 0;
+const reportTimer = setInterval(() => {
+  reportHeight();
+  if (++reportTries >= 20) clearInterval(reportTimer);
+}, 500);
+})();
+</script>
+</body>
+</html>
