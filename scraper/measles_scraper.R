@@ -826,6 +826,8 @@ tryCatch({
 },
 error = function(e) {
   message("ERROR: Scrape job failed: ", conditionMessage(e))
+  message("=== Scrape job complete ===\n")
+  quit(status = 1)
 })
 
 message("=== Scrape job complete ===\n")

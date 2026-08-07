@@ -26,7 +26,15 @@ jobs:
           Rscript -e "install.packages(c('httr2','rvest','dplyr','readr','stringr','jsonlite'), repos='https://cloud.r-project.org')"
 
       - name: Run scraper
-        run: Rscript scraper/measles_scraper.R
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Scraper attempt $attempt ==="
+            Rscript scraper/measles_scraper.R && exit 0
+            echo "Attempt $attempt failed."
+            sleep 15
+          done
+          echo "All attempts failed."
+          exit 1
 
       - name: Commit updated data files
         run: |
