@@ -179,7 +179,15 @@ pbi_post <- function(url, resource_key, body) {
 
 # A visual's `map` filter value normally shows up in its own `query`'s Where
 # clause, but Power BI sometimes ships a visual with an empty `query` (its
-# filter state lives only in `filters` in that case) — check both.
+# filter state lives only in `filters` in that case) — check both. When found
+# via `filters`, also return that filter's own Where clause: combined with
+# the visual's prototypeQuery (see find_county_map_visuals()), that's enough
+# to build a full query for this visual without needing a sibling's query to
+# clone (see build_query_from_prototype()) — needed because Power BI's
+# publish-to-web reports cache each visual's `query` as part of report
+# session state, and that cache can go empty for every table simultaneously
+# after the underlying dataset refreshes, until some live viewer re-renders
+# them (observed 2026-08-08: all three county tables empty at once).
 extract_map_value <- function(vc) {
   query_json <- tryCatch(fromJSON(vc$query, simplifyVector = FALSE), error = function(e) NULL)
   where <- query_json$Commands[[1]]$SemanticQueryDataShapeCommand$Query$Where
@@ -187,7 +195,7 @@ extract_map_value <- function(vc) {
     cond <- w$Condition$In
     if (is.null(cond)) next
     if (!identical(cond$Expressions[[1]]$Column$Property, "map")) next
-    return(str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'"))
+    return(list(value = str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'"), where = NULL))
   }
 
   filters <- tryCatch(fromJSON(vc$filters, simplifyVector = FALSE), error = function(e) NULL)
@@ -195,7 +203,10 @@ extract_map_value <- function(vc) {
     if (!identical(tryCatch(f$expression$Column$Property, error = function(e) NULL), "map")) next
     cond <- tryCatch(f$filter$Where[[1]]$Condition$In, error = function(e) NULL)
     if (is.null(cond)) next
-    return(str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'"))
+    return(list(
+      value = str_remove_all(cond$Values[[1]][[1]]$Literal$Value, "'"),
+      where = f$filter$Where
+    ))
   }
 
   NULL
@@ -217,6 +228,36 @@ build_query_for_map_value <- function(template_query, map_value) {
   toJSON(q, auto_unbox = TRUE)
 }
 
+# Build a query from a visual's own prototypeQuery (Select/From, always
+# present in its config) plus its map filter's own Where clause (from
+# extract_map_value()) — used when NO visual in the report has a populated
+# `query` to clone via build_query_for_map_value(). Unlike a cloned query,
+# this always uses a single flat Binding grouping, which Power BI returns
+# under the DSR's DM0 key rather than DM1 — see query_pbi_county_table().
+build_query_from_prototype <- function(prototype_query, where) {
+  if (is.null(prototype_query) || is.null(where)) {
+    stop(
+      "Cannot build a query for a table visual with neither its own `query`, ",
+      "nor a sibling's to clone, nor a prototypeQuery/map filter to build one from."
+    )
+  }
+  q <- list(Commands = list(list(SemanticQueryDataShapeCommand = list(
+    Query = list(
+      Version = prototype_query$Version,
+      From    = prototype_query$From,
+      Select  = prototype_query$Select,
+      Where   = where
+    ),
+    Binding = list(
+      Primary        = list(Groupings = list(list(Projections = as.list(seq_along(prototype_query$Select) - 1L)))),
+      DataReduction  = list(DataVolume = 4, Primary = list(Window = list(Count = 1000))),
+      Version        = 1
+    ),
+    ExecutionMetricsKind = 1
+  ))))
+  toJSON(q, auto_unbox = TRUE)
+}
+
 # Find every tableEx visual, anywhere in the report, that is filtered on a
 # `map` field — these are the county/case-count tables backing each map.
 find_county_map_visuals <- function(exploration) {
@@ -228,13 +269,16 @@ find_county_map_visuals <- function(exploration) {
       sv  <- cfg$singleVisual
       if (is.null(sv) || !identical(sv$visualType, "tableEx")) next
 
-      map_value <- extract_map_value(vc)
-      if (is.null(map_value)) next
+      map_info <- extract_map_value(vc)
+      if (is.null(map_info)) next
 
       # `vc$id` (numeric) is what the querydata API wants as VisualId, but
       # bookmarks reference visuals by `cfg$name` (a hash-like string) —
       # keep both.
-      vc_map[[map_value]] <- list(id = vc$id, name = cfg$name, query = vc$query)
+      vc_map[[map_info$value]] <- list(
+        id = vc$id, name = cfg$name, query = vc$query,
+        prototype_query = sv$prototypeQuery, where = map_info$where
+      )
     }
   }
 
@@ -245,9 +289,11 @@ find_county_map_visuals <- function(exploration) {
     )
   }
 
-  # Some visuals' `query` may be empty (see extract_map_value()) — fill those
-  # in from any sibling visual that does have one, since they share the same
-  # Select/entity shape and only differ in their `map` filter value.
+  # Some visuals' `query` may be empty (see extract_map_value()) — prefer
+  # filling those in from any sibling visual that does have one, since it's
+  # cheap and known to match Power BI's usual DSR shape (DM1). If no sibling
+  # has one either, fall back to building the query from the visual's own
+  # prototypeQuery + map Where clause (see build_query_from_prototype()).
   template_query <- NULL
   for (v in vc_map) {
     if (!is.null(v$query) && nchar(v$query) > 0) {
@@ -255,11 +301,12 @@ find_county_map_visuals <- function(exploration) {
       break
     }
   }
-  if (!is.null(template_query)) {
-    for (map_value in names(vc_map)) {
-      if (is.null(vc_map[[map_value]]$query) || nchar(vc_map[[map_value]]$query) == 0) {
-        vc_map[[map_value]]$query <- build_query_for_map_value(template_query, map_value)
-      }
+  for (map_value in names(vc_map)) {
+    if (!is.null(vc_map[[map_value]]$query) && nchar(vc_map[[map_value]]$query) > 0) next
+    vc_map[[map_value]]$query <- if (!is.null(template_query)) {
+      build_query_for_map_value(template_query, map_value)
+    } else {
+      build_query_from_prototype(vc_map[[map_value]]$prototype_query, vc_map[[map_value]]$where)
     }
   }
 
@@ -386,9 +433,13 @@ query_pbi_county_table <- function(ctx, vc) {
   dsr <- query_pbi_visual(ctx, vc)
   dm1 <- NULL
   for (ph in dsr$DS[[1]]$PH) {
+    # DM1 is what a cloned/original two-level-binding query returns; DM0 is
+    # what build_query_from_prototype()'s single flat grouping level
+    # produces instead — both use the same row-set encoding.
     if (!is.null(ph$DM1)) { dm1 <- ph$DM1; break }
+    if (!is.null(ph$DM0)) { dm1 <- ph$DM0; break }
   }
-  if (is.null(dm1)) stop("Power BI query returned no county rows (DM1 missing)")
+  if (is.null(dm1)) stop("Power BI query returned no county rows (DM1/DM0 missing)")
 
   decode_dsr_rows(dm1)
 }
