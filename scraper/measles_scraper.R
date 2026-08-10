@@ -431,13 +431,24 @@ query_pbi_visual <- function(ctx, vc) {
 
 query_pbi_county_table <- function(ctx, vc) {
   dsr <- query_pbi_visual(ctx, vc)
+  ph_list <- dsr$DS[[1]]$PH
+
+  # DM1 is what a cloned/original two-level-binding query returns; DM0 is
+  # what build_query_from_prototype()'s single flat grouping level produces
+  # instead — both use the same row-set encoding. Power BI can also emit a
+  # separate PH entry holding an unrelated scalar aggregate under DM0 (e.g.
+  # a row-count summary) alongside the real DM1 rows, so scan every PH entry
+  # for DM1 first and only fall back to DM0 if none of them have one —
+  # otherwise the aggregate's single-value DM0 gets mistaken for row data
+  # (observed 2026-08-10: a report add of that summary PH broke this).
   dm1 <- NULL
-  for (ph in dsr$DS[[1]]$PH) {
-    # DM1 is what a cloned/original two-level-binding query returns; DM0 is
-    # what build_query_from_prototype()'s single flat grouping level
-    # produces instead — both use the same row-set encoding.
+  for (ph in ph_list) {
     if (!is.null(ph$DM1)) { dm1 <- ph$DM1; break }
-    if (!is.null(ph$DM0)) { dm1 <- ph$DM0; break }
+  }
+  if (is.null(dm1)) {
+    for (ph in ph_list) {
+      if (!is.null(ph$DM0)) { dm1 <- ph$DM0; break }
+    }
   }
   if (is.null(dm1)) stop("Power BI query returned no county rows (DM1/DM0 missing)")
 
