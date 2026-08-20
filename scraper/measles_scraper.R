@@ -30,6 +30,7 @@ suppressPackageStartupMessages({
 SOURCE_URL          <- "https://www.pa.gov/agencies/health/diseases-conditions/infectious-disease/measles"
 DEFAULT_TSV         <- "data/measles_daily.tsv"
 WEEKLY_TSV          <- "data/measles_weekly.tsv"
+AGE_GROUP_TSV       <- "data/measles_daily_age_group.tsv"
 TSV_COLS            <- c("date", "new_cases", "county", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
@@ -537,6 +538,102 @@ fetch_hospitalization_total <- function(ctx) {
 }
 
 # ---------------------------------------------------------------------------
+# Cases by age group — statewide YTD cumulative, broken out by age group, not
+# by day. We derive day-to-day new/cumulative counts per age group by
+# diffing each group's cumulative snapshot against what's already recorded,
+# the same way fetch_hospitalization_total() is diffed below.
+# ---------------------------------------------------------------------------
+
+# Find the "Cases by Age Group" columnChart — identified by having "agegrp"
+# as a Select column in its prototypeQuery, same matching strategy as
+# find_card_visual_by_property() but keyed on a grouping column rather than
+# an aggregated one.
+find_age_group_visual <- function(exploration) {
+  for (section in exploration$sections) {
+    for (vc in section$visualContainers) {
+      cfg <- tryCatch(fromJSON(vc$config, simplifyVector = FALSE), error = function(e) NULL)
+      sv  <- cfg$singleVisual
+      if (is.null(sv) || !identical(sv$visualType, "columnChart")) next
+
+      select <- sv$prototypeQuery$Select
+      if (is.null(select)) next
+
+      is_age_visual <- any(vapply(select, function(s) {
+        identical(tryCatch(s$Column$Property, error = function(e) NULL), "agegrp")
+      }, logical(1)))
+      if (is_age_visual) return(vc)
+    }
+  }
+  NULL
+}
+
+# Decode a DSR's DM0 row set into (category, count) pairs, resolving the
+# dictionary-encoded category column against ValueDicts. Unlike
+# decode_dsr_rows() (used for the county tables), this also handles the "Ø"
+# bitmask Power BI uses to mark a column's value as null on a given row
+# (rather than merely repeated from the row above, which is what "R" means)
+# — the age-group chart requests every bucket via ShowItemsWithNoData, so a
+# bucket with zero matching cases comes back with a null count instead of an
+# explicit 0.
+decode_dsr_categorical <- function(dsr) {
+  ds <- dsr$DS[[1]]
+  dm0 <- NULL
+  for (ph in ds$PH) {
+    if (!is.null(ph$DM0)) { dm0 <- ph$DM0; break }
+  }
+  if (is.null(dm0)) stop("Power BI query returned no rows (DM0 missing)")
+
+  col_meta <- dm0[[1]]$S
+  n_cols   <- length(col_meta)
+  prev     <- vector("list", n_cols)
+  rows     <- vector("list", length(dm0))
+
+  for (i in seq_along(dm0)) {
+    item      <- dm0[[i]]
+    c_vals    <- item$C
+    r_mask    <- item$R
+    null_mask <- item[["Ø"]]
+    ci <- 1
+    row_vals <- vector("list", n_cols)
+    for (col in seq_len(n_cols)) {
+      bit <- bitwShiftL(1L, col - 1)
+      if (!is.null(r_mask) && bitwAnd(as.integer(r_mask), bit) != 0) {
+        row_vals[[col]] <- prev[[col]]
+      } else if (!is.null(null_mask) && bitwAnd(as.integer(null_mask), bit) != 0) {
+        row_vals[[col]] <- NA
+      } else {
+        row_vals[[col]] <- c_vals[[ci]]
+        ci <- ci + 1
+      }
+    }
+    prev <- row_vals
+    rows[[i]] <- row_vals
+  }
+
+  dict_col    <- which(!vapply(col_meta, function(s) is.null(s$DN), logical(1)))[1]
+  dict_values <- ds$ValueDicts[[col_meta[[dict_col]]$DN]]
+  value_col   <- setdiff(seq_len(n_cols), dict_col)[1]
+
+  tibble(
+    category = vapply(rows, function(r) dict_values[[as.integer(r[[dict_col]]) + 1]], character(1)),
+    count    = vapply(rows, function(r) if (is.na(r[[value_col]])) 0L else as.integer(r[[value_col]]), integer(1))
+  )
+}
+
+# Statewide YTD cumulative case count for every age-group bucket the
+# dashboard breaks cases into (e.g. "0-4", "5-9", ... "65+", "Unk").
+fetch_age_group_snapshot <- function(ctx) {
+  vc <- find_age_group_visual(ctx$exploration)
+  if (is.null(vc)) {
+    stop(
+      "No 'Cases by Age Group' chart found in the Power BI report. ",
+      "The dashboard layout may have changed — check the embed or update fetch_age_group_snapshot()."
+    )
+  }
+  decode_dsr_categorical(query_pbi_visual(ctx, vc)) |> rename(age_group = category)
+}
+
+# ---------------------------------------------------------------------------
 # TSV helpers
 # ---------------------------------------------------------------------------
 
@@ -572,9 +669,10 @@ save_tsv_data <- function(df, path) {
 # week going back to the start of the outbreak, with two independently
 # maintained columns:
 #   - `new_cases`: synced from measles_daily.tsv's scrape-date rollup every
-#     run, EXCEPT for weeks flagged `adjusted` (e.g. a lump-sum catch-up
-#     delta after a scraper outage misattributes cases to the wrong week) —
-#     those are hand-corrected and never auto-overwritten. See README.
+#     run, EXCEPT for weeks listed in ADJUSTED_WEEKS (e.g. a lump-sum
+#     catch-up delta after a scraper outage misattributes cases to the wrong
+#     week) — those are hand-corrected and never auto-overwritten. See
+#     README.
 #   - `hospitalizations`: statewide cumulative hospitalizations aren't
 #     available broken out by day/county, only as a running YTD total on
 #     the dashboard — so each scrape run derives *this week's* new
@@ -583,22 +681,24 @@ save_tsv_data <- function(df, path) {
 #     any week before we started tracking it.
 # Kept separate from measles_daily.tsv so that file stays an honest record
 # of actual scrape dates. See README.
-WEEKLY_TSV_COLS <- c("week_start", "new_cases", "adjusted", "hospitalizations", "note")
+WEEKLY_TSV_COLS <- c("week_start", "new_cases", "hospitalizations")
+
+# Weeks whose `new_cases` was corrected by hand and must never be
+# auto-overwritten by sync_weekly_case_counts() — see README's "Known
+# limitations" for why (2026-07-08 to 2026-07-24 scraper outage).
+ADJUSTED_WEEKS <- c("2026-07-13", "2026-07-20")
 
 load_weekly_tsv <- function(path) {
   if (!file.exists(path)) {
     return(tibble(
       week_start       = character(),
       new_cases        = integer(),
-      adjusted         = logical(),
-      hospitalizations = integer(),
-      note             = character()
+      hospitalizations = integer()
     ))
   }
 
   df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
   df$new_cases        <- as.integer(df$new_cases)
-  df$adjusted          <- !is.na(df$adjusted) & df$adjusted == "TRUE"
   df$hospitalizations <- as.integer(df$hospitalizations)
   message("Loaded ", nrow(df), " week(s) from '", path, "'")
   df
@@ -609,13 +709,12 @@ save_weekly_tsv <- function(df, path) {
     if (!col %in% names(df)) df[[col]] <- NA
   }
   df <- df[order(df$week_start), WEEKLY_TSV_COLS]
-  df$adjusted <- ifelse(df$adjusted, "TRUE", NA)
   write_tsv(df, path, na = "")
   message("Saved ", nrow(df), " week(s) to '", path, "'")
 }
 
 # Refresh `new_cases` for every week from measles_daily.tsv's scrape-date
-# rollup, except weeks marked `adjusted` (hand-corrected, left untouched).
+# rollup, except weeks in ADJUSTED_WEEKS (hand-corrected, left untouched).
 # Adds a row for any new week that's shown up in measles_daily.tsv but isn't
 # in the weekly file yet.
 sync_weekly_case_counts <- function(weekly_df, daily_df) {
@@ -630,14 +729,12 @@ sync_weekly_case_counts <- function(weekly_df, daily_df) {
     val <- computed$new_cases[i]
 
     if (wk %in% weekly_df$week_start) {
-      is_adjusted <- isTRUE(weekly_df$adjusted[weekly_df$week_start == wk])
-      if (!is_adjusted) {
+      if (!(wk %in% ADJUSTED_WEEKS)) {
         weekly_df$new_cases[weekly_df$week_start == wk] <- val
       }
     } else {
       weekly_df <- bind_rows(weekly_df, tibble(
-        week_start = wk, new_cases = val, adjusted = FALSE,
-        hospitalizations = NA_integer_, note = NA_character_
+        week_start = wk, new_cases = val, hospitalizations = NA_integer_
       ))
     }
   }
@@ -666,12 +763,40 @@ update_weekly_hospitalizations <- function(weekly_df, current_week_start, ytd_to
     weekly_df$hospitalizations[weekly_df$week_start == current_week_start] <- this_week
   } else {
     weekly_df <- bind_rows(weekly_df, tibble(
-      week_start = current_week_start, new_cases = NA_integer_, adjusted = FALSE,
-      hospitalizations = this_week, note = NA_character_
+      week_start = current_week_start, new_cases = NA_integer_, hospitalizations = this_week
     ))
   }
 
   weekly_df
+}
+
+# measles_daily_age_group.tsv: one row per day a given age group's statewide
+# cumulative case count went up, mirroring measles_daily.tsv's "only write a
+# row when the count changes" convention.
+AGE_GROUP_TSV_COLS <- c("date", "age_group", "new_cases")
+
+load_age_group_tsv <- function(path) {
+  if (!file.exists(path)) {
+    message("TSV not found at '", path, "' — will create a new one on first write")
+    return(tibble(date = character(), age_group = character(), new_cases = integer()))
+  }
+  df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
+  df$new_cases <- as.integer(df$new_cases)
+  message("Loaded ", nrow(df), " existing row(s) from '", path, "'")
+  df
+}
+
+# The dashboard's own bucket order (youngest to oldest, "Unk" last) — sorting
+# alphabetically instead would scramble it (e.g. "10-17" before "5-9").
+AGE_GROUP_ORDER <- c("0-4", "5-9", "10-17", "18-24", "25-49", "50-64", "65+", "Unk")
+
+save_age_group_tsv <- function(df, path) {
+  for (col in AGE_GROUP_TSV_COLS) {
+    if (!col %in% names(df)) df[[col]] <- NA
+  }
+  df <- df[order(df$date, match(df$age_group, AGE_GROUP_ORDER)), AGE_GROUP_TSV_COLS]
+  write_tsv(df, path, na = "")
+  message("Saved ", nrow(df), " row(s) to '", path, "'")
 }
 
 # ---------------------------------------------------------------------------
@@ -716,6 +841,46 @@ build_new_rows <- function(snapshot, existing) {
       ))
     } else {
       message(sprintf("No change: %s County (outbreak %d)", county, ob))
+    }
+  }
+
+  if (length(new_rows) == 0) return(NULL)
+  bind_rows(new_rows)
+}
+
+age_group_totals_from_tsv <- function(existing) {
+  existing |>
+    group_by(age_group) |>
+    summarise(known_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
+}
+
+build_new_age_group_rows <- function(snapshot, existing) {
+  today    <- as.character(Sys.Date())
+  totals   <- age_group_totals_from_tsv(existing)
+  new_rows <- list()
+
+  for (i in seq_len(nrow(snapshot))) {
+    grp      <- snapshot$age_group[i]
+    cum_n    <- snapshot$count[i]
+    known_row <- totals |> filter(age_group == !!grp)
+    known_n   <- if (nrow(known_row) == 0) 0L else known_row$known_total
+
+    delta <- cum_n - known_n
+
+    if (delta > 0) {
+      message(sprintf("NEW: +%d case(s) in age group %s", delta, grp))
+      new_rows[[length(new_rows) + 1]] <- tibble(
+        date      = today,
+        age_group = grp,
+        new_cases = delta
+      )
+    } else if (delta < 0) {
+      warning(sprintf(
+        "ANOMALY: cumulative case count for age group %s decreased from %d to %d — skipping",
+        grp, known_n, cum_n
+      ))
+    } else {
+      message(sprintf("No change: age group %s", grp))
     }
   }
 
@@ -852,6 +1017,24 @@ tryCatch({
   })
 
   save_weekly_tsv(weekly_tsv, WEEKLY_TSV)
+
+  # Age-group case counts are likewise non-fatal to fetch/update — a failure
+  # here shouldn't roll back the county/weekly/hospitalization updates above.
+  tryCatch({
+    age_snapshot   <- fetch_age_group_snapshot(pbi_ctx)
+    existing_age   <- load_age_group_tsv(AGE_GROUP_TSV)
+    new_age_rows   <- build_new_age_group_rows(age_snapshot, existing_age)
+
+    if (!is.null(new_age_rows)) {
+      updated_age <- bind_rows(existing_age, new_age_rows)
+      save_age_group_tsv(updated_age, AGE_GROUP_TSV)
+      message("Added ", nrow(new_age_rows), " new age-group row(s) to '", AGE_GROUP_TSV, "'")
+    } else {
+      message("No change in age-group case counts — '", AGE_GROUP_TSV, "' unchanged")
+    }
+  }, error = function(e) {
+    message("WARNING: Age-group case update failed — ", conditionMessage(e))
+  })
 
   # Skip updating any embed whose file isn't present, rather than failing
   # the run — keeps this resilient if an embed is ever removed or renamed.
