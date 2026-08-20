@@ -1,31 +1,31 @@
-week_start	new_cases	adjusted	hospitalizations	note
-2026-01-26	5			Outbreak start (first known case week)
-2026-02-02	1			
-2026-02-09	2			
-2026-02-16	0			
-2026-02-23	4			
-2026-03-02	0			
-2026-03-09	0			
-2026-03-16	0			
-2026-03-23	0			
-2026-03-30	0			
-2026-04-06	0			
-2026-04-13	0			
-2026-04-20	1			Second, larger outbreak begins
-2026-04-27	4			
-2026-05-04	9			
-2026-05-11	4			
-2026-05-18	4			
-2026-05-25	4			
-2026-06-01	22			
-2026-06-08	5			
-2026-06-15	2			
-2026-06-22	17			
-2026-06-29	5			
-2026-07-06	12			
-2026-07-13	9	TRUE		Manual adjustment — scraper outage 2026-07-08 to 2026-07-24 lumped the whole gap under one 2026-07-24 delta; split using PDOH's separately reported '29 cases in the last 7 days' figure. See README.
-2026-07-20	29	TRUE	25	Manual adjustment — see note on 2026-07-13 row above and README. Hospitalizations tracking begins this week — see README.
-2026-07-27	28		7	
-2026-08-03	59		3	
-2026-08-10	70		17	
-2026-08-17	44		10	
+week_start	new_cases	hospitalizations
+2026-01-26	5	
+2026-02-02	1	
+2026-02-09	2	
+2026-02-16	0	
+2026-02-23	4	
+2026-03-02	0	
+2026-03-09	0	
+2026-03-16	0	
+2026-03-23	0	
+2026-03-30	0	
+2026-04-06	0	
+2026-04-13	0	
+2026-04-20	1	
+2026-04-27	4	
+2026-05-04	9	
+2026-05-11	4	
+2026-05-18	4	
+2026-05-25	4	
+2026-06-01	22	
+2026-06-08	5	
+2026-06-15	2	
+2026-06-22	17	
+2026-06-29	5	
+2026-07-06	12	
+2026-07-13	9	
+2026-07-20	29	25
+2026-07-27	28	7
+2026-08-03	59	3
+2026-08-10	70	17
+2026-08-17	44	10
