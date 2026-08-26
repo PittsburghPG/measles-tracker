@@ -98,6 +98,20 @@
   const svgEl = document.getElementById('pg-bar-svg');
   const tip = document.getElementById('pg-bar-tip');
 
+  // Flips the tooltip to the left of the cursor when it would otherwise
+  // overflow the right edge of the window — position:fixed is relative
+  // to the iframe's own viewport when embedded, so an unclamped tooltip
+  // gets clipped by the iframe boundary rather than wrapping visibly.
+  function positionTip(event) {
+    const tipWidth = tip.getBoundingClientRect().width;
+    let left = event.clientX + 12;
+    if (left + tipWidth > window.innerWidth - 4) {
+      left = event.clientX - 12 - tipWidth;
+    }
+    tip.style.left = left + 'px';
+    tip.style.top = (event.clientY - 10) + 'px';
+  }
+
 function draw() {
   // Re-measured on every draw (not just once at load) so the chart
   // redraws at true size on resize, instead of the browser uniformly
@@ -148,11 +162,9 @@ function draw() {
       const label = d.lt5 ? 'Fewer than 5 cases' : `${d.cases} case${d.cases !== 1 ? 's' : ''}`;
       tip.innerHTML = `<strong>${d.year}</strong><br>${label}`;
       tip.style.display = 'block';
+      positionTip(event);
     })
-    .on('mousemove', function (event) {
-      tip.style.left = (event.clientX + 12) + 'px';
-      tip.style.top  = (event.clientY - 10) + 'px';
-    })
+    .on('mousemove', positionTip)
     .on('mouseout', function () {
       tip.style.display = 'none';
     });
@@ -194,14 +206,26 @@ window.addEventListener('resize', () => {
 // after the chart's first paint.
 new ResizeObserver(reportHeight).observe(container);
 
+// document.fonts.ready resolves once Roboto has actually finished loading
+// and swapped in. ResizeObserver is supposed to catch the resulting
+// text-reflow on its own, but that's an observed gap on some mobile
+// WebKit versions specifically — confirmed in production as a mobile
+// iframe getting stuck short, never growing to the post-font-swap height.
+// This guarantees one more report fires exactly when it's needed, instead
+// of hoping the observer or the timer below catches it.
+if (window.document.fonts && window.document.fonts.ready) {
+  window.document.fonts.ready.then(reportHeight);
+}
+
 // Belt-and-braces on top of the ResizeObserver: re-send the height on a
-// plain timer for the first few seconds after load, the same way
+// plain timer for the first several seconds after load, the same way
 // production embed libraries (Datawrapper's included) do — a backstop
-// against any timing race regardless of its exact cause.
+// against any timing race regardless of its exact cause. 30 tries / 500ms
+// = 15s, long enough to outlast a slow mobile connection's web font fetch.
 let reportTries = 0;
 const reportTimer = setInterval(() => {
   reportHeight();
-  if (++reportTries >= 20) clearInterval(reportTimer);
+  if (++reportTries >= 30) clearInterval(reportTimer);
 }, 500);
 })();
 </script>
