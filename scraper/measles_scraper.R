@@ -148,13 +148,34 @@ get_pbi_cluster_base <- function(embed_url) {
 # The API doesn't always send a proper "application/json" Content-Type
 # (sometimes "text/plain"), so parse the body directly rather than relying
 # on resp_body_json()'s content-type check.
-pbi_perform <- function(req, url) {
-  resp <- tryCatch(
-    req |> req_timeout(30) |> req_perform(),
-    error = function(e) stop("Power BI request failed (", url, "): ", conditionMessage(e))
-  )
-  if (resp_status(resp) != 200) stop("Power BI returned HTTP ", resp_status(resp), " for ", url)
-  fromJSON(resp_body_string(resp), simplifyVector = FALSE)
+#
+# Power BI's publish-to-web session cache can intermittently return a
+# 200 with an empty body — the same underlying flakiness noted elsewhere
+# in this file for the county tables (see find_county_map_visuals()), but
+# here it surfaces as fromJSON() choking on an empty string ("Argument
+# 'txt' must be a JSON string, URL or file") rather than a missing
+# `query`. Observed 2026-08-2x on the age-group chart specifically,
+# breaking that fetch for several days straight since it had no retry.
+# A short retry loop clears it almost every time, so retry before giving
+# up rather than failing the (possibly non-fatal) caller outright.
+pbi_perform <- function(req, url, max_attempts = 3) {
+  for (attempt in seq_len(max_attempts)) {
+    resp <- tryCatch(
+      req |> req_timeout(30) |> req_perform(),
+      error = function(e) stop("Power BI request failed (", url, "): ", conditionMessage(e))
+    )
+    if (resp_status(resp) != 200) stop("Power BI returned HTTP ", resp_status(resp), " for ", url)
+
+    body   <- resp_body_string(resp)
+    parsed <- if (nchar(trimws(body)) > 0) tryCatch(fromJSON(body, simplifyVector = FALSE), error = function(e) NULL) else NULL
+    if (!is.null(parsed)) return(parsed)
+
+    if (attempt < max_attempts) {
+      message("Power BI returned an empty/invalid response for ", url, " — retrying (attempt ", attempt, "/", max_attempts, ")")
+      Sys.sleep(2)
+    }
+  }
+  stop("Power BI returned an empty or invalid response after ", max_attempts, " attempts (", url, ")")
 }
 
 pbi_get <- function(url, resource_key) {
