@@ -67,8 +67,8 @@
 <body>
 
 <div id="pg-measles-weekly">
-  <h2 class="pg-weekly-hed">Outbreak accelerates weeks before schools start</h2>
-  <p class="pg-weekly-chatter">Over just the past seven days, twenty-eight people have tested positive for measles in Pennsylvania, bringing the state's annual total to 167. With children returning to school next month, experts say they are concerned the outbreak will get even worse.</p>
+  <h2 class="pg-weekly-hed">State health officials have confirmed 393 cases</h2>
+  <p class="pg-weekly-chatter">The outbreak that started in late April has accelerated as children return to school this month.</p>
   <div style="position:relative">
     <svg id="pg-weekly-svg" style="width:100%;display:block"></svg>
   </div>
@@ -119,6 +119,20 @@
   const container = document.getElementById('pg-measles-weekly');
   const svgEl = document.getElementById('pg-weekly-svg');
   const tip = document.getElementById('pg-weekly-tip');
+
+  // Flips the tooltip to the left of the cursor when it would otherwise
+  // overflow the right edge of the window — position:fixed is relative
+  // to the iframe's own viewport when embedded, so an unclamped tooltip
+  // gets clipped by the iframe boundary rather than wrapping visibly.
+  function positionTip(event) {
+    const tipWidth = tip.getBoundingClientRect().width;
+    let left = event.clientX + 12;
+    if (left + tipWidth > window.innerWidth - 4) {
+      left = event.clientX - 12 - tipWidth;
+    }
+    tip.style.left = left + 'px';
+    tip.style.top = (event.clientY - 10) + 'px';
+  }
 
 function draw() {
   // Re-measured on every draw (not just once at load) so the chart
@@ -268,56 +282,26 @@ function draw() {
     .attr('fill', '#a93226').attr('opacity', 0.75)
     .style('cursor', 'pointer')
     .on('mouseover', function (event, d) {
-      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.new_cases} new case${d.new_cases !== 1 ? 's' : ''}<br>${d.cumulative_cases} cumulative`;
+      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.new_cases} case${d.new_cases !== 1 ? 's' : ''} reported<br>${d.cumulative_cases} cumulative`;
       tip.style.display = 'block';
+      positionTip(event);
     })
-    .on('mousemove', function (event) {
-      tip.style.left = (event.clientX + 12) + 'px';
-      tip.style.top  = (event.clientY - 10) + 'px';
-    })
+    .on('mousemove', positionTip)
     .on('mouseout', function () {
       tip.style.display = 'none';
     });
 
-  // Bar value labels — bars are chronological left-to-right, so a greedy
-  // left-to-right pass (drop a label if it would overlap the last one we
-  // kept) is enough to prevent collisions on narrow (mobile) widths
-  // without shrinking text below the style guide's 12px floor. The most
-  // recent week's label is always kept — it's the chart's headline number.
-  const barLabels = g.selectAll('.wbar-label').data(weeklyData.filter(d => d.new_cases > 0)).join('text')
-    .attr('class', 'wbar-label')
-    .attr('x', centerX)
-    .attr('y', d => y(d.new_cases) - 4)
-    .attr('text-anchor', 'middle')
-    .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#a93226').attr('font-weight', '700')
-    .text(d => d.new_cases);
-
-  const barLabelNodes = barLabels.nodes();
-  if (barLabelNodes.length > 0) {
-    let lastRight = barLabelNodes[0].getBBox().x + barLabelNodes[0].getBBox().width;
-    for (let i = 1; i < barLabelNodes.length - 1; i++) {
-      const bbox = barLabelNodes[i].getBBox();
-      if (bbox.x < lastRight + 2) {
-        d3.select(barLabelNodes[i]).remove();
-      } else {
-        lastRight = bbox.x + bbox.width;
-      }
-    }
-    if (barLabelNodes.length > 1) {
-      const last = barLabelNodes[barLabelNodes.length - 1];
-      const lastBBox = last.getBBox();
-      // Drop the second-to-last kept label instead if it would collide
-      // with the guaranteed-last one.
-      for (let i = barLabelNodes.length - 2; i >= 0; i--) {
-        const node = barLabelNodes[i];
-        if (!node.isConnected) continue;
-        const bbox = node.getBBox();
-        if (bbox.x + bbox.width > lastBBox.x - 2) {
-          d3.select(node).remove();
-        }
-        break;
-      }
-    }
+  // Bar value label — only the most recent week's, since it's the
+  // chart's headline number. Older bars are still readable via tooltip.
+  const mostRecent = weeklyData[weeklyData.length - 1];
+  if (mostRecent.new_cases > 0) {
+    g.selectAll('.wbar-label').data([mostRecent]).join('text')
+      .attr('class', 'wbar-label')
+      .attr('x', centerX)
+      .attr('y', d => y(d.new_cases) - 4)
+      .attr('text-anchor', 'middle')
+      .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#a93226').attr('font-weight', '700')
+      .text(d => d.new_cases);
   }
 
   // Cumulative line
@@ -347,13 +331,11 @@ function draw() {
     .attr('r', 8).attr('fill', 'transparent')
     .style('cursor', 'pointer')
     .on('mouseover', function (event, d) {
-      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.cumulative_cases} cumulative case${d.cumulative_cases !== 1 ? 's' : ''}<br>${d.new_cases} new that week`;
+      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.new_cases} case${d.new_cases !== 1 ? 's' : ''} reported<br>${d.cumulative_cases} cumulative`;
       tip.style.display = 'block';
+      positionTip(event);
     })
-    .on('mousemove', function (event) {
-      tip.style.left = (event.clientX + 12) + 'px';
-      tip.style.top  = (event.clientY - 10) + 'px';
-    })
+    .on('mousemove', positionTip)
     .on('mouseout', function () {
       tip.style.display = 'none';
     });
@@ -404,14 +386,26 @@ window.addEventListener('resize', () => {
 // after the chart's first paint.
 new ResizeObserver(reportHeight).observe(container);
 
+// document.fonts.ready resolves once Roboto has actually finished loading
+// and swapped in. ResizeObserver is supposed to catch the resulting
+// text-reflow on its own, but that's an observed gap on some mobile
+// WebKit versions specifically — confirmed in production as a mobile
+// iframe getting stuck short, never growing to the post-font-swap height.
+// This guarantees one more report fires exactly when it's needed, instead
+// of hoping the observer or the timer below catches it.
+if (window.document.fonts && window.document.fonts.ready) {
+  window.document.fonts.ready.then(reportHeight);
+}
+
 // Belt-and-braces on top of the ResizeObserver: re-send the height on a
-// plain timer for the first few seconds after load, the same way
+// plain timer for the first several seconds after load, the same way
 // production embed libraries (Datawrapper's included) do — a backstop
-// against any timing race regardless of its exact cause.
+// against any timing race regardless of its exact cause. 30 tries / 500ms
+// = 15s, long enough to outlast a slow mobile connection's web font fetch.
 let reportTries = 0;
 const reportTimer = setInterval(() => {
   reportHeight();
-  if (++reportTries >= 20) clearInterval(reportTimer);
+  if (++reportTries >= 30) clearInterval(reportTimer);
 }, 500);
 })();
 </script>

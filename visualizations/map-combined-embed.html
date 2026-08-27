@@ -44,6 +44,13 @@
     margin-bottom: 16px;
   }
 
+  .dw-highlight {
+    text-decoration-line: underline;
+    text-decoration-color: #a93226;
+    text-decoration-thickness: 3px;
+    text-underline-offset: 5px;
+  }
+
   #map-svg {
     width: 100%;
     display: block;
@@ -62,10 +69,13 @@
     margin: 0 1px;
   }
 
-  .county          { fill: #efefef; stroke: #fff; stroke-width: 0.75px; }
-  .county.affected { fill: url(#hatch-active); }
+  .county             { fill: #efefef; stroke: #fff; stroke-width: 0.75px; }
+  .county.affected    { fill: url(#hatch-active); }
+  .county.transmission{ fill: url(#hatch-transmission); stroke: #7a1a10; stroke-width: 1px; }
   .bubble          { stroke-width: 1px; fill: #a93226; stroke: #a93226; fill-opacity: 0.12; cursor: pointer; transition: fill-opacity 0.1s; }
   .bubble:hover    { fill-opacity: 0.45; }
+  .bubble.dot      { fill: none; stroke-width: 1.25px; transition: stroke-width 0.1s; }
+  .bubble.dot:hover{ stroke-width: 2.5px; }
 
   #tooltip {
     position: fixed;
@@ -148,11 +158,20 @@
   };
 /* SCRAPER-DATA-END */
 
+// Counties the DOH dashboard's "Community Transmission" tab flags as having
+// active local spread (as opposed to a case tied to travel or a known
+// contact) — pulled by hand from that tab, since the daily scraper doesn't
+// walk it yet. Update alongside caseData when the dashboard's figure moves.
+const TRANSMISSION_COUNTIES = [
+  "Berks", "Centre", "Chester", "Clearfield", "Indiana",
+  "Jefferson", "Lancaster", "Mifflin", "Snyder", "York"
+];
+
 const countyCount = Object.keys(caseData).length;
 document.getElementById('dw-title').textContent =
-  `Measles cases have spread to more than a dozen counties.`;
-document.getElementById('dw-description').textContent =
-  `Lancaster County has been the epicenter of two outbreaks this year — an early surge in cases that started in January and ended two months later, and an ongoing outbreak that began in April. Cases have since spread to ${countyCount} counties.`;
+  `Measles cases have spread to more than two dozen counties`;
+document.getElementById('dw-description').innerHTML =
+  `Measles cases have been reported in ${countyCount} counties this year. State health officials have identified at least ${TRANSMISSION_COUNTIES.length} counties where measles is <span class="dw-highlight">actively circulating</span> and the risk of being infected is highest.`;
 document.getElementById('dw-asof').textContent = lastUpdated;
 
 const paFips = {
@@ -175,10 +194,7 @@ const paFips = {
   "42129":"Westmoreland","42131":"Wyoming","42133":"York"
 };
 
-const labelConfig = {
-  "Lancaster": { anchor: "middle", dx: 0, dy: 1,  pos: "below" },
-  "Lebanon":   { anchor: "middle", dx: 0, dy: -1, pos: "above" },
-};
+const labelConfig = {};
 
 const cities = [
   { name: "Philadelphia", lon: -75.1652, lat: 39.9526, anchor: "middle", dx: 0, dy: 18, star: false },
@@ -193,8 +209,17 @@ function showTip(e, county, cases) {
   tip.style.display = 'block';
   moveTip(e);
 }
+// Flips the tooltip to the left of the cursor when it would otherwise
+// overflow the right edge of the window — position:fixed is relative to
+// the iframe's own viewport when embedded, so an unclamped tooltip gets
+// clipped by the iframe boundary rather than wrapping visibly.
 function moveTip(e) {
-  tip.style.left = (e.clientX + 14) + 'px';
+  const tipWidth = tip.getBoundingClientRect().width;
+  let left = e.clientX + 14;
+  if (left + tipWidth > window.innerWidth - 4) {
+    left = e.clientX - 14 - tipWidth;
+  }
+  tip.style.left = left + 'px';
   tip.style.top  = (e.clientY - 12) + 'px';
 }
 function hideTip() { tip.style.display = 'none'; }
@@ -258,11 +283,28 @@ function render() {
 
   const path = d3.geoPath().projection(projection);
   const maxCases = d3.max(Object.values(caseData));
-  // Floored so single-digit counts (e.g. "1") still get a bubble large
-  // enough to hold their label legibly — otherwise the sqrt scale alone
-  // shrinks them to a few pixels.
-  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 48]);
-  const rScale = v => Math.max(8, rScaleRaw(v));
+  // County shapes are drawn to fill VIEW_W edge-to-edge no matter what
+  // VIEW_W actually is (k, above, is chosen specifically to do that) — so a
+  // county's on-screen size shrinks right along with a narrower mobile
+  // container. Bubble radius was a fixed viewBox-unit constant, though,
+  // which does NOT shrink with VIEW_W, so on a narrow phone bubbles stayed
+  // desktop-sized while the counties under them shrank — badly out of
+  // proportion. sizeFactor scales bubble/dot sizing down with the actual
+  // container width (never up past the desktop baseline this was tuned
+  // against) so the two stay in proportion at any width.
+  const sizeFactor = Math.sqrt(Math.min(1, VIEW_W / 680));
+  // Floored so a labeled county's bubble is still large enough to hold its
+  // number legibly — otherwise the sqrt scale alone shrinks the smallest
+  // labeled counts to a few pixels. Counties below LABEL_MIN don't use this
+  // scale at all — they render as a small fixed dot instead (see below).
+  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 38 * sizeFactor]);
+  const rScale = v => Math.max(7, 8.5 * sizeFactor, rScaleRaw(v));
+
+  // Below this many cases, a county gets a small unlabeled dot instead of a
+  // numbered bubble — with case counts this high, full bubbles for every
+  // single-digit county packed the map too densely to read.
+  const LABEL_MIN = 5;
+  const DOT_RADIUS = Math.max(1.75, 2.25 * sizeFactor);
 
   const svg = d3.select('#map-svg');
   svg.selectAll('*').remove();
@@ -279,15 +321,49 @@ function render() {
     .call(p => p.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6)
       .attr('stroke', '#e0b8a8').attr('stroke-width', 1));
 
+  defs.append('pattern')
+    .attr('id', 'hatch-transmission')
+    .attr('patternUnits', 'userSpaceOnUse')
+    .attr('width', 6).attr('height', 6)
+    .attr('patternTransform', 'rotate(45)')
+    .call(p => p.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#dba99c'))
+    .call(p => p.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6)
+      .attr('stroke', '#c8886f').attr('stroke-width', 1));
+
   // Counties
   g.selectAll('.county')
     .data(paCounties.features)
     .join('path')
     .attr('class', d => {
       const name = paFips[d.id];
-      return (name && caseData[name]) ? 'county affected' : 'county';
+      let cls = (name && caseData[name]) ? 'county affected' : 'county';
+      if (name && TRANSMISSION_COUNTIES.includes(name)) cls += ' transmission';
+      return cls;
     })
     .attr('d', path);
+
+  // A per-county stroke on every transmission county draws just as heavy a
+  // line between two ADJACENT transmission counties as it does at the true
+  // edge of the cluster — the shared internal borders end up just as dark
+  // as the outer one, so a contiguous run of counties reads as a uniform
+  // grid instead of one highlighted region. Meshing the topology instead
+  // keeps only the arcs where membership actually changes (plus any state-
+  // edge arcs of a member county), so a single outline traces just the
+  // true perimeter of the transmission counties, however many there are or
+  // however they're clustered.
+  const inTransmissionSet = f => !!f && TRANSMISSION_COUNTIES.includes(paFips[f.id]);
+  const transmissionOutline = topojson.mesh(PA_TOPOLOGY, PA_TOPOLOGY.objects.counties, (a, b) => {
+    const aIn = inTransmissionSet(a), bIn = inTransmissionSet(b);
+    return aIn !== bIn || (a === b && aIn);
+  });
+  g.append('path')
+    .datum(transmissionOutline)
+    .attr('d', path)
+    .attr('fill', 'none')
+    .attr('stroke', '#a93226')
+    .attr('stroke-width', 1.5)
+    .attr('stroke-linejoin', 'round')
+    .attr('pointer-events', 'none');
 
   // Bubbles + labels
   Object.entries(caseData).forEach(([name, cases]) => {
@@ -295,6 +371,17 @@ function render() {
     const feature = paCounties.features.find(f => paFips[f.id] === name);
     if (!feature) return;
     const centroid = path.centroid(feature);
+
+    if (cases < LABEL_MIN) {
+      g.append('circle')
+        .attr('class', 'bubble dot')
+        .attr('cx', centroid[0]).attr('cy', centroid[1]).attr('r', DOT_RADIUS)
+        .on('mouseover', e => showTip(e, name, cases))
+        .on('mousemove', moveTip)
+        .on('mouseout', hideTip);
+      return;
+    }
+
     const r = rScale(cases);
 
     g.append('circle')
@@ -304,13 +391,19 @@ function render() {
       .on('mousemove', moveTip)
       .on('mouseout', hideTip);
 
-    g.append('text').attr('class', `case-count-label${cases < 10 ? ' small' : ''}`)
-      .attr('x', centroid[0]).attr('y', centroid[1])
-      .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
-      .attr('font-family', "'Roboto', Arial, sans-serif")
-      .attr('font-size', r > 25 ? '14px' : '12px')
-      .attr('font-weight', '700').attr('fill', '#7a1a10')
-      .text(cases);
+    // Number labels are restricted to actively-circulating counties — the
+    // bubble's size still encodes every county's case count, but the exact
+    // number is only called out where it matters most.
+    if (TRANSMISSION_COUNTIES.includes(name)) {
+      g.append('text').attr('class', `case-count-label${cases < 10 ? ' small' : ''}`)
+        .attr('x', centroid[0]).attr('y', centroid[1])
+        .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
+        .attr('font-family', "'Roboto', Arial, sans-serif")
+        .attr('font-size', r > 25 ? '14px' : '12px')
+        .attr('font-weight', '700').attr('fill', '#7a1a10')
+        .attr('pointer-events', 'none')
+        .text(cases);
+    }
 
     // County labels
     const cfg = labelConfig[name];
@@ -374,16 +467,28 @@ function drawMap() {
   // after the chart's first paint.
   new ResizeObserver(reportHeight).observe(document.querySelector('.dw-chart'));
 
+  // document.fonts.ready resolves once Roboto has actually finished loading
+  // and swapped in. ResizeObserver is supposed to catch the resulting
+  // text-reflow on its own, but that's an observed gap on some mobile
+  // WebKit versions specifically — confirmed in production as a mobile
+  // iframe getting stuck short, never growing to the post-font-swap
+  // height. This guarantees one more report fires exactly when it's
+  // needed, instead of hoping the observer or the timer below catches it.
+  if (window.document.fonts && window.document.fonts.ready) {
+    window.document.fonts.ready.then(reportHeight);
+  }
+
   // Belt-and-braces on top of the ResizeObserver: re-send the height on
-  // a plain timer for the first few seconds after load, the same way
+  // a plain timer for the first several seconds after load, the same way
   // production embed libraries (Datawrapper's included) do. This defeats
   // any one-off timing race we haven't diagnosed — mobile Safari's
   // handling of a lazy-loaded iframe's initial layout, in particular —
-  // regardless of its exact cause.
+  // regardless of its exact cause. 30 tries / 500ms = 15s, long enough to
+  // outlast a slow mobile connection's web font fetch.
   let reportTries = 0;
   const reportTimer = setInterval(() => {
     reportHeight();
-    if (++reportTries >= 20) clearInterval(reportTimer);
+    if (++reportTries >= 30) clearInterval(reportTimer);
   }, 500);
 }
 
