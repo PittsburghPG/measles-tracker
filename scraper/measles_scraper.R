@@ -508,11 +508,13 @@ parse_cases <- function(ctx) {
 }
 
 # ---------------------------------------------------------------------------
-# Hospitalizations (statewide YTD cumulative — not broken out by county)
+# Hospitalizations (statewide YTD cumulative — not broken out by county) —
+# the dashboard's "Hospitalization" tab breaks its cumulative hospitalization
+# count into three cards: total, under-18, and 18+.
 # ---------------------------------------------------------------------------
 
 # Find a cardVisual anywhere in the report that displays Sum(<property>) —
-# used to locate the "Hospitalized" card without hardcoding its visual id.
+# used to locate a specific stat card without hardcoding its visual id.
 find_card_visual_by_property <- function(exploration, property_name) {
   for (section in exploration$sections) {
     for (vc in section$visualContainers) {
@@ -535,35 +537,52 @@ find_card_visual_by_property <- function(exploration, property_name) {
 
 # Card-visual queries return a single aggregate value in DM0, keyed by
 # whatever name the DSR assigned it (usually "M0") rather than a fixed key.
+# The hospitalization cards render their measure as text (e.g. "83 of  460",
+# i.e. "<hospitalized> of <total cases>") rather than a bare number, so pull
+# out the leading integer instead of coercing the whole string.
 extract_dsr_scalar <- function(dsr) {
   for (ph in dsr$DS[[1]]$PH) {
     if (!is.null(ph$DM0)) {
       row <- ph$DM0[[1]]
       key <- row$S[[1]]$N
-      return(as.integer(row[[key]]))
+      raw <- as.character(row[[key]])
+      m   <- str_match(raw, "-?\\d+")
+      if (is.na(m[1, 1])) stop("Could not parse a numeric value from Power BI scalar: '", raw, "'")
+      return(as.integer(m[1, 1]))
     }
   }
   stop("Power BI query returned no scalar value (DM0 missing)")
 }
 
-# Statewide cumulative hospitalizations, year-to-date, straight from the
-# dashboard's own "Hospitalized" card — not available broken out by county.
-fetch_hospitalization_total <- function(ctx) {
-  vc <- find_card_visual_by_property(ctx$exploration, "hosp")
-  if (is.null(vc)) {
-    stop(
-      "No 'Hospitalized' card visual found in the Power BI report. ",
-      "The dashboard layout may have changed — check the embed or update fetch_hospitalization_total()."
-    )
+# Maps each hospitalization category to the `property` name of its card
+# visual on the dashboard's Hospitalization tab.
+HOSP_CATEGORY_PROPERTIES <- c(total = "hosptotal", children = "hospunder18", adult = "hosp18plus")
+
+# Statewide cumulative hospitalizations, year-to-date, for each of the three
+# categories the dashboard tracks (total / under-18 / 18+) — not available
+# broken out by county.
+fetch_hospitalization_snapshot <- function(ctx) {
+  rows <- list()
+  for (category in names(HOSP_CATEGORY_PROPERTIES)) {
+    property <- HOSP_CATEGORY_PROPERTIES[[category]]
+    vc <- find_card_visual_by_property(ctx$exploration, property)
+    if (is.null(vc)) {
+      stop(
+        "No hospitalization card visual found for '", property, "' (category '", category, "'). ",
+        "The dashboard layout may have changed — check the embed or update fetch_hospitalization_snapshot()."
+      )
+    }
+    count <- extract_dsr_scalar(query_pbi_visual(ctx, vc))
+    rows[[length(rows) + 1]] <- tibble(category = category, count = count)
   }
-  extract_dsr_scalar(query_pbi_visual(ctx, vc))
+  bind_rows(rows)
 }
 
 # ---------------------------------------------------------------------------
 # Cases by age group — statewide YTD cumulative, broken out by age group, not
 # by day. We derive day-to-day new/cumulative counts per age group by
 # diffing each group's cumulative snapshot against what's already recorded,
-# the same way fetch_hospitalization_total() is diffed below.
+# the same way the hospitalization snapshot is diffed below.
 # ---------------------------------------------------------------------------
 
 # Find the "Cases by Age Group" columnChart — identified by having "agegrp"
@@ -758,18 +777,24 @@ sync_weekly_case_counts <- function(weekly_df, daily_df) {
   weekly_df |> arrange(week_start)
 }
 
-# measles_daily_hospitalization.tsv: statewide hospitalizations per day.
-# PDOH's dashboard only exposes a running YTD cumulative hospitalization
-# total (not broken out by day or county), so each scrape run records that
-# total as `cumulative_hospitalizations` and derives `new_hospitalizations`
-# by diffing it against the most recent prior day's cumulative total already
-# on record. Unlike measles_daily.tsv, this can't be broken out by county.
-DAILY_HOSP_TSV_COLS <- c("date", "new_hospitalizations", "cumulative_hospitalizations")
+# measles_daily_hospitalization.tsv: statewide hospitalizations per day, one
+# row per category (total / children [under 18] / adult [18+]) — mirroring
+# HOSP_CATEGORY_PROPERTIES above. PDOH's dashboard only exposes a running YTD
+# cumulative total per category (not broken out by day or county), so each
+# scrape run records that total as `cumulative_hospitalizations` and derives
+# `new_hospitalizations` by diffing it against the category's most recent
+# prior day's cumulative total already on record. Unlike measles_daily.tsv,
+# this can't be broken out by county.
+DAILY_HOSP_TSV_COLS  <- c("date", "category", "new_hospitalizations", "cumulative_hospitalizations")
+HOSP_CATEGORY_ORDER  <- c("total", "children", "adult")
 
 load_daily_hosp_tsv <- function(path) {
   if (!file.exists(path)) {
     message("TSV not found at '", path, "' — will create a new one on first write")
-    return(tibble(date = character(), new_hospitalizations = integer(), cumulative_hospitalizations = integer()))
+    return(tibble(
+      date = character(), category = character(),
+      new_hospitalizations = integer(), cumulative_hospitalizations = integer()
+    ))
   }
   df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
   df$new_hospitalizations        <- as.integer(df$new_hospitalizations)
@@ -782,39 +807,44 @@ save_daily_hosp_tsv <- function(df, path) {
   for (col in DAILY_HOSP_TSV_COLS) {
     if (!col %in% names(df)) df[[col]] <- NA
   }
-  df <- df[order(df$date), DAILY_HOSP_TSV_COLS]
+  df <- df[order(df$date, match(df$category, HOSP_CATEGORY_ORDER)), DAILY_HOSP_TSV_COLS]
   write_tsv(df, path, na = "")
   message("Saved ", nrow(df), " row(s) to '", path, "'")
 }
 
-# Today's new hospitalizations = current YTD cumulative total minus the most
-# recent prior day's cumulative total already on record (0 if there is no
-# prior day yet). Diffing against that single baseline, rather than summing
-# every prior day's `new_hospitalizations`, means one day's figure can never
-# drift from the cumulative history even if an earlier row was ever hand-
-# corrected.
-update_daily_hospitalizations <- function(hosp_df, today, ytd_total) {
-  prior <- hosp_df |> filter(date != today, !is.na(cumulative_hospitalizations))
-  prior_cumulative <- if (nrow(prior) == 0) 0L else {
-    prior |> filter(date == max(date)) |> pull(cumulative_hospitalizations) |> first()
-  }
+# Today's new hospitalizations for a category = its current YTD cumulative
+# total minus that category's most recent prior day's cumulative total
+# already on record (0 if there is no prior day yet). Diffing against that
+# single baseline, rather than summing every prior day's
+# `new_hospitalizations`, means one day's figure can never drift from the
+# cumulative history even if an earlier row was ever hand-corrected.
+update_daily_hospitalizations <- function(hosp_df, today, snapshot) {
+  new_rows <- list()
 
-  today_n <- as.integer(ytd_total - prior_cumulative)
-  message(sprintf(
-    "Hospitalizations: %d cumulative YTD, %d new today (%s)",
-    ytd_total, today_n, today
-  ))
+  for (i in seq_len(nrow(snapshot))) {
+    category  <- snapshot$category[i]
+    ytd_total <- snapshot$count[i]
 
-  if (today %in% hosp_df$date) {
-    hosp_df$new_hospitalizations[hosp_df$date == today]        <- today_n
-    hosp_df$cumulative_hospitalizations[hosp_df$date == today] <- ytd_total
-  } else {
-    hosp_df <- bind_rows(hosp_df, tibble(
-      date = today, new_hospitalizations = today_n, cumulative_hospitalizations = ytd_total
+    prior <- hosp_df |> filter(category == !!category, date != today, !is.na(cumulative_hospitalizations))
+    prior_cumulative <- if (nrow(prior) == 0) 0L else {
+      prior |> filter(date == max(date)) |> pull(cumulative_hospitalizations) |> first()
+    }
+
+    today_n <- as.integer(ytd_total - prior_cumulative)
+    message(sprintf(
+      "Hospitalizations (%s): %d cumulative YTD, %d new today (%s)",
+      category, ytd_total, today_n, today
     ))
+
+    new_rows[[length(new_rows) + 1]] <- tibble(
+      date = today, category = category,
+      new_hospitalizations = today_n, cumulative_hospitalizations = ytd_total
+    )
   }
 
-  hosp_df
+  hosp_df |>
+    filter(!(date == today & category %in% snapshot$category)) |>
+    bind_rows(bind_rows(new_rows))
 }
 
 # measles_daily_age_group.tsv: one row per day a given age group's statewide
@@ -1076,10 +1106,10 @@ tryCatch({
   # case-count sync above still gets saved, just without a hospitalization
   # update this run.
   tryCatch({
-    hosp_total  <- fetch_hospitalization_total(pbi_ctx)
-    today       <- as.character(Sys.Date())
-    hosp_tsv    <- load_daily_hosp_tsv(DAILY_HOSP_TSV) |>
-      update_daily_hospitalizations(today, hosp_total)
+    hosp_snapshot <- fetch_hospitalization_snapshot(pbi_ctx)
+    today         <- as.character(Sys.Date())
+    hosp_tsv      <- load_daily_hosp_tsv(DAILY_HOSP_TSV) |>
+      update_daily_hospitalizations(today, hosp_snapshot)
     save_daily_hosp_tsv(hosp_tsv, DAILY_HOSP_TSV)
   }, error = function(e) {
     message("WARNING: Hospitalization update failed — ", conditionMessage(e))

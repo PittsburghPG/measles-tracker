@@ -1,3 +1,7 @@
-date	new_hospitalizations	cumulative_hospitalizations
-2026-08-28		83
-2026-08-31	4	87
+date	category	new_hospitalizations	cumulative_hospitalizations
+2026-08-28	total		83
+2026-08-28	children		24
+2026-08-28	adult		59
+2026-08-31	total	4	87
+2026-08-31	children	0	24
+2026-08-31	adult	4	63
