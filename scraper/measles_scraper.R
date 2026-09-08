@@ -1141,7 +1141,7 @@ tryCatch({
     total_cases      <- sum(case_data$total)
     current_outbreak <- sum(case_data$ob2)
     prior_outbreak   <- sum(case_data$ob1)
-    last_updated     <- format(Sys.Date(), "%B %e, %Y") |> trimws()
+    last_updated     <- format(Sys.Date(), "%b %e, %Y") |> trimws()
 
     if (file.exists(BAR_EMBED_HTML)) {
       update_bar_embed(total_cases, BAR_EMBED_HTML)
