@@ -32,7 +32,7 @@ DEFAULT_TSV         <- "data/measles_daily_county.tsv"
 WEEKLY_TSV          <- "data/measles_weekly.tsv"
 AGE_GROUP_TSV       <- "data/measles_daily_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/measles_daily_hospitalization.tsv"
-TSV_COLS            <- c("date", "new_cases", "county", "source", "outbreak", "cumulative_cases")
+TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
 MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
@@ -684,11 +684,11 @@ load_tsv_data <- function(path) {
     return(
       tibble(
         date             = character(),
-        new_cases        = integer(),
         county           = character(),
+        new_cases        = integer(),
+        cumulative_cases = integer(),
         source           = character(),
-        outbreak         = integer(),
-        cumulative_cases = integer()
+        outbreak         = integer()
       )
     )
   }
@@ -889,11 +889,11 @@ save_age_group_tsv <- function(df, path) {
 
 # `snapshot$new_cases` (despite the name, inherited from the PBI table's own
 # column) is actually PDOH's cumulative case count for that county+outbreak,
-# not a "new today" figure — see parse_cases(). So a new row's
-# `cumulative_cases` is just that snapshot value directly, the same way
-# age-group rows store their cumulative straight off the dashboard (see
-# AGE_GROUP_TSV_COLS) rather than re-deriving it from `new_cases` and risking
-# drift.
+# not a "new today" figure — see parse_cases(). It's used below to detect
+# each outbreak's delta, but NOT as `cumulative_cases` directly: that column
+# tracks each county's running total across the whole year (both outbreaks
+# combined), so it's accumulated locally instead — see
+# county_year_totals_from_tsv().
 county_totals_from_tsv <- function(existing, outbreak_num) {
   existing |>
     filter(outbreak == outbreak_num) |>
@@ -901,9 +901,21 @@ county_totals_from_tsv <- function(existing, outbreak_num) {
     summarise(known_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
 }
 
+# Each county's running case total across both outbreaks combined, as of
+# `existing` — the starting point `cumulative_cases` accumulates from in
+# build_new_rows().
+county_year_totals_from_tsv <- function(existing) {
+  existing |>
+    group_by(county) |>
+    summarise(year_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
+}
+
 build_new_rows <- function(snapshot, existing) {
   today <- as.character(Sys.Date())
   new_rows <- list()
+
+  year_totals <- county_year_totals_from_tsv(existing)
+  year_total_lookup <- setNames(as.list(year_totals$year_total), year_totals$county)
 
   for (i in seq_len(nrow(snapshot))) {
     ob     <- snapshot$outbreak[i]
@@ -918,13 +930,21 @@ build_new_rows <- function(snapshot, existing) {
 
     if (delta > 0) {
       message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
+
+      # Accumulate locally (rather than re-reading `existing`) so that if the
+      # same county gets a new row for each outbreak within this same run,
+      # the second row's cumulative total reflects the first.
+      prior_year_total <- if (is.null(year_total_lookup[[county]])) 0L else year_total_lookup[[county]]
+      year_total <- prior_year_total + delta
+      year_total_lookup[[county]] <- year_total
+
       new_rows[[length(new_rows) + 1]] <- tibble(
         date             = today,
-        new_cases        = delta,
         county           = county,
+        new_cases        = delta,
+        cumulative_cases = year_total,
         source           = "Scrape of PDOH measles webpage",
-        outbreak         = ob,
-        cumulative_cases = snap_n
+        outbreak         = ob
       )
     } else if (delta < 0) {
       warning(sprintf(
