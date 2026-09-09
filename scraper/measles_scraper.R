@@ -28,11 +28,11 @@ suppressPackageStartupMessages({
 # ---------------------------------------------------------------------------
 
 SOURCE_URL          <- "https://www.pa.gov/agencies/health/diseases-conditions/infectious-disease/measles"
-DEFAULT_TSV         <- "data/measles_daily.tsv"
+DEFAULT_TSV         <- "data/measles_daily_county.tsv"
 WEEKLY_TSV          <- "data/measles_weekly.tsv"
 AGE_GROUP_TSV       <- "data/measles_daily_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/measles_daily_hospitalization.tsv"
-TSV_COLS            <- c("date", "new_cases", "county", "source", "outbreak")
+TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
 MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
@@ -683,17 +683,19 @@ load_tsv_data <- function(path) {
     message("TSV not found at '", path, "' — will create a new one on first write")
     return(
       tibble(
-        date      = character(),
-        new_cases = integer(),
-        county    = character(),
-        source    = character(),
-        outbreak  = integer()
+        date             = character(),
+        county           = character(),
+        new_cases        = integer(),
+        cumulative_cases = integer(),
+        source           = character(),
+        outbreak         = integer()
       )
     )
   }
   df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
-  df$new_cases <- as.integer(df$new_cases)
-  df$outbreak  <- as.integer(df$outbreak)
+  df$new_cases        <- as.integer(df$new_cases)
+  df$outbreak         <- as.integer(df$outbreak)
+  df$cumulative_cases <- as.integer(df$cumulative_cases)
   message("Loaded ", nrow(df), " existing rows from '", path, "'")
   df
 }
@@ -708,13 +710,13 @@ save_tsv_data <- function(df, path) {
 
 # measles_weekly.tsv is the full, authoritative weekly record — one row per
 # week going back to the start of the outbreak, with `new_cases` synced from
-# measles_daily.tsv's scrape-date rollup every run, EXCEPT for weeks listed
+# measles_daily_county.tsv's scrape-date rollup every run, EXCEPT for weeks listed
 # in ADJUSTED_WEEKS (e.g. a lump-sum catch-up delta after a scraper outage
 # misattributes cases to the wrong week) — those are hand-corrected and
 # never auto-overwritten. `cumulative_cases` is fully derived (a running sum
 # of `new_cases`), so it's recomputed from scratch on every save rather than
 # tracked as independent state — see save_weekly_tsv(). See README.
-# Kept separate from measles_daily.tsv so that file stays an honest record
+# Kept separate from measles_daily_county.tsv so that file stays an honest record
 # of actual scrape dates. See README.
 WEEKLY_TSV_COLS <- c("week_start", "new_cases", "cumulative_cases")
 
@@ -748,9 +750,9 @@ save_weekly_tsv <- function(df, path) {
   message("Saved ", nrow(df), " week(s) to '", path, "'")
 }
 
-# Refresh `new_cases` for every week from measles_daily.tsv's scrape-date
+# Refresh `new_cases` for every week from measles_daily_county.tsv's scrape-date
 # rollup, except weeks in ADJUSTED_WEEKS (hand-corrected, left untouched).
-# Adds a row for any new week that's shown up in measles_daily.tsv but isn't
+# Adds a row for any new week that's shown up in measles_daily_county.tsv but isn't
 # in the weekly file yet.
 sync_weekly_case_counts <- function(weekly_df, daily_df) {
   computed <- daily_df |>
@@ -783,7 +785,7 @@ sync_weekly_case_counts <- function(weekly_df, daily_df) {
 # cumulative total per category (not broken out by day or county), so each
 # scrape run records that total as `cumulative_hospitalizations` and derives
 # `new_hospitalizations` by diffing it against the category's most recent
-# prior day's cumulative total already on record. Unlike measles_daily.tsv,
+# prior day's cumulative total already on record. Unlike measles_daily_county.tsv,
 # this can't be broken out by county.
 DAILY_HOSP_TSV_COLS  <- c("date", "category", "new_hospitalizations", "cumulative_hospitalizations")
 HOSP_CATEGORY_ORDER  <- c("total", "children", "adult")
@@ -848,7 +850,7 @@ update_daily_hospitalizations <- function(hosp_df, today, snapshot) {
 }
 
 # measles_daily_age_group.tsv: one row per day a given age group's statewide
-# cumulative case count went up, mirroring measles_daily.tsv's "only write a
+# cumulative case count went up, mirroring measles_daily_county.tsv's "only write a
 # row when the count changes" convention. `cumulative_cases` is the group's
 # statewide YTD total straight off the dashboard for that day; `new_cases` is
 # blank on a group's very first tracked row (there's no prior baseline to
@@ -885,6 +887,13 @@ save_age_group_tsv <- function(df, path) {
 # Delta logic
 # ---------------------------------------------------------------------------
 
+# `snapshot$new_cases` (despite the name, inherited from the PBI table's own
+# column) is actually PDOH's cumulative case count for that county+outbreak,
+# not a "new today" figure — see parse_cases(). It's used below to detect
+# each outbreak's delta, but NOT as `cumulative_cases` directly: that column
+# tracks each county's running total across the whole year (both outbreaks
+# combined), so it's accumulated locally instead — see
+# county_year_totals_from_tsv().
 county_totals_from_tsv <- function(existing, outbreak_num) {
   existing |>
     filter(outbreak == outbreak_num) |>
@@ -892,9 +901,21 @@ county_totals_from_tsv <- function(existing, outbreak_num) {
     summarise(known_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
 }
 
+# Each county's running case total across both outbreaks combined, as of
+# `existing` — the starting point `cumulative_cases` accumulates from in
+# build_new_rows().
+county_year_totals_from_tsv <- function(existing) {
+  existing |>
+    group_by(county) |>
+    summarise(year_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
+}
+
 build_new_rows <- function(snapshot, existing) {
   today <- as.character(Sys.Date())
   new_rows <- list()
+
+  year_totals <- county_year_totals_from_tsv(existing)
+  year_total_lookup <- setNames(as.list(year_totals$year_total), year_totals$county)
 
   for (i in seq_len(nrow(snapshot))) {
     ob     <- snapshot$outbreak[i]
@@ -909,12 +930,21 @@ build_new_rows <- function(snapshot, existing) {
 
     if (delta > 0) {
       message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
+
+      # Accumulate locally (rather than re-reading `existing`) so that if the
+      # same county gets a new row for each outbreak within this same run,
+      # the second row's cumulative total reflects the first.
+      prior_year_total <- if (is.null(year_total_lookup[[county]])) 0L else year_total_lookup[[county]]
+      year_total <- prior_year_total + delta
+      year_total_lookup[[county]] <- year_total
+
       new_rows[[length(new_rows) + 1]] <- tibble(
-        date      = today,
-        new_cases = delta,
-        county    = county,
-        source    = "Scrape of PDOH measles webpage",
-        outbreak  = ob
+        date             = today,
+        county           = county,
+        new_cases        = delta,
+        cumulative_cases = year_total,
+        source           = "Scrape of PDOH measles webpage",
+        outbreak         = ob
       )
     } else if (delta < 0) {
       warning(sprintf(
