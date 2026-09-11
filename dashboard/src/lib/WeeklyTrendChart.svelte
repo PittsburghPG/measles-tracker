@@ -3,17 +3,46 @@
 
 	// `data`: array of { week_start: 'YYYY-MM-DD', new: number, cumulative: number },
 	// sorted ascending. `unitLabel`: singular noun for tooltip text, e.g. "case".
-	let { data, unitLabel = 'case' } = $props();
+	// `annotations`: optional array of { date: 'YYYY-MM-DD', text: string } —
+	// context-specific callouts (e.g. "outbreak started here"), so left for
+	// the caller to supply rather than baked into this generic component.
+	let { data, unitLabel = 'case', annotations = [] } = $props();
 
 	let container = $state();
 	let svgEl = $state();
 	let tooltip = $state({ visible: false, x: 0, y: 0, html: '' });
 
 	const parseWeek = (s) => new Date(s + 'T12:00:00Z');
+	const parseDate = d3.utcParse('%Y-%m-%d');
 	const msPerWeek = 7 * 24 * 60 * 60 * 1000;
 	const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 	const apMonths = ['Jan', 'Feb', 'March', 'April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
 	const fmtWeek = (d) => `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+
+	// Standard d3 multi-line SVG text wrap (SVG has no native word-wrap):
+	// greedily packs words onto a <tspan> until it would exceed `width`,
+	// then starts a new one.
+	function wrapSvgText(textSelection, width) {
+		textSelection.each(function () {
+			const text = d3.select(this);
+			const words = text.text().split(/\s+/).reverse();
+			const x = text.attr('x');
+			const y = text.attr('y');
+			let word;
+			let line = [];
+			let tspan = text.text(null).append('tspan').attr('x', x).attr('y', y);
+			while ((word = words.pop())) {
+				line.push(word);
+				tspan.text(line.join(' '));
+				if (tspan.node().getComputedTextLength() > width && line.length > 1) {
+					line.pop();
+					tspan.text(line.join(' '));
+					line = [word];
+					tspan = text.append('tspan').attr('x', x).attr('dy', '1.3em').text(word);
+				}
+			}
+		});
+	}
 
 	function tipHtml(d) {
 		const n = d.new;
@@ -23,10 +52,51 @@
 	function render() {
 		if (!container || !svgEl || data.length === 0) return;
 
-		const margin = { top: 30, right: 16, bottom: 32, left: 36 };
+		// `w` only depends on totalW and the fixed left/right margins, so it
+		// (and the x-scale/domain built from it below) can be computed before
+		// knowing how much vertical room the annotation band needs — which
+		// in turn depends on where those x-positions actually land, to
+		// detect whether two labels would collide at the current width.
+		const baseMargin = { right: 16, bottom: 32, left: 36 };
 		const totalW = container.getBoundingClientRect().width || 640;
-		const totalH = 230;
-		const w = totalW - margin.left - margin.right;
+		const w = totalW - baseMargin.left - baseMargin.right;
+
+		const weekDates = data.map((d) => parseWeek(d.week_start));
+		const domainStart = new Date(d3.min(weekDates).getTime() - msPerWeek * 0.5);
+		const domainEnd = new Date(d3.max(weekDates).getTime() + msPerWeek * 0.5);
+		const x = d3.scaleTime().domain([domainStart, domainEnd]).range([0, w]);
+
+		// Two labels whose dates land close together at the current width
+		// would otherwise overlap, so a label is placed in a second row
+		// below the first whenever it isn't clear of every label already
+		// placed in row 0 — good enough for the handful of callouts this
+		// ever has to place at once.
+		const annotationWidth = Math.min(190, w * 0.46);
+		const annotationMinGap = 12;
+		const row0Extents = [];
+		const annotationPlacements = annotations
+			.map((ann) => ({ ann, date: parseDate(ann.date) }))
+			.filter(({ date }) => date >= domainStart && date <= domainEnd)
+			.map(({ ann, date }) => {
+				const ax = x(date);
+				const labelX = Math.max(0, Math.min(ax, w - annotationWidth));
+				const overlapsRow0 = row0Extents.some(
+					(extent) => labelX < extent.end + annotationMinGap && labelX + annotationWidth > extent.start - annotationMinGap
+				);
+				const row = overlapsRow0 ? 1 : 0;
+				if (row === 0) row0Extents.push({ start: labelX, end: labelX + annotationWidth });
+				return { ann, ax, labelX, row };
+			});
+		const annotationRows = annotationPlacements.reduce((max, p) => Math.max(max, p.row), -1) + 1;
+
+		// Annotations need extra room above the plot area to hold their
+		// wrapped label text — reserved only when there are any, so charts
+		// without annotations (e.g. the per-county chart) keep their normal
+		// height.
+		const rowHeight = 58;
+		const annotationBand = annotationRows > 0 ? 18 + annotationRows * rowHeight : 0;
+		const margin = { ...baseMargin, top: 30 + annotationBand };
+		const totalH = 230 + annotationBand;
 		const h = totalH - margin.top - margin.bottom;
 
 		const svg = d3.select(svgEl).attr('viewBox', `0 0 ${totalW} ${totalH}`).attr('width', totalW).attr('height', totalH);
@@ -62,11 +132,6 @@
 			.text(`Cumulative ${unitLabel}s`);
 
 		const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
-
-		const weekDates = data.map((d) => parseWeek(d.week_start));
-		const domainStart = new Date(d3.min(weekDates).getTime() - msPerWeek * 0.5);
-		const domainEnd = new Date(d3.max(weekDates).getTime() + msPerWeek * 0.5);
-		const x = d3.scaleTime().domain([domainStart, domainEnd]).range([0, w]);
 
 		const weekPx = (w * msPerWeek) / (domainEnd - domainStart);
 		const barWidth = Math.max(2, weekPx * 0.65);
@@ -163,6 +228,32 @@
 			});
 		}
 
+		// Callouts for specific dates — a dashed guide line through the full
+		// plot height (so it's visible against both the bars and the line)
+		// with a wrapped text label in the reserved band above (row
+		// placement was already worked out above, before `h` existed).
+		if (annotationPlacements.length > 0) {
+			const annoGroup = g.append('g').attr('class', 'annotations');
+
+			for (const { ann, ax, labelX, row } of annotationPlacements) {
+				annoGroup
+					.append('line')
+					.attr('class', 'annotation-line')
+					.attr('x1', ax)
+					.attr('x2', ax)
+					.attr('y1', -14)
+					.attr('y2', h);
+
+				annoGroup
+					.append('text')
+					.attr('class', 'annotation-text')
+					.attr('x', labelX)
+					.attr('y', -annotationBand + 14 + row * rowHeight)
+					.text(ann.text)
+					.call((sel) => wrapSvgText(sel, annotationWidth));
+			}
+		}
+
 		const showTip = (event, d) => {
 			const [mx, my] = d3.pointer(event, container);
 			tooltip = { visible: true, x: mx + 12, y: my - 10, html: tipHtml(d) };
@@ -224,6 +315,7 @@
 	$effect(() => {
 		data;
 		unitLabel;
+		annotations;
 		render();
 	});
 
@@ -298,6 +390,18 @@
 
 	:global(.legend-swatch-dot) {
 		fill: #1a1a1a;
+	}
+
+	:global(.annotation-line) {
+		stroke: #bbb;
+		stroke-width: 1;
+		stroke-dasharray: 3 3;
+	}
+
+	:global(.annotation-text) {
+		font-family: 'Roboto', Arial, sans-serif;
+		font-size: 11px;
+		fill: #555;
 	}
 
 	.tooltip {
