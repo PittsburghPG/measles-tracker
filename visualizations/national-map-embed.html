@@ -319,7 +319,7 @@ function render() {
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
       .attr('font-family', "'Roboto', Arial, sans-serif")
       .attr('font-size', r > 18 ? '13px' : '11px')
-      .attr('font-weight', '700').attr('fill', '#7a1a10')
+      .attr('font-weight', '700').attr('fill', isHighlighted ? '#fff' : '#7a1a10')
       .attr('pointer-events', 'none')
       .text(cases);
   });
