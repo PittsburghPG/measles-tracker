@@ -250,8 +250,8 @@ function render() {
   // Northeast corridor especially), the same size range overlapped badly.
   const maxCases = d3.max(Object.values(caseData));
   const sizeFactor = Math.sqrt(Math.min(1, VIEW_W / 680));
-  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 44 * sizeFactor]);
-  const rScale = v => Math.max(8, 9 * sizeFactor, rScaleRaw(v));
+  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 56 * sizeFactor]);
+  const rScale = v => Math.max(11, 12 * sizeFactor, rScaleRaw(v));
   const LABEL_MIN = 51;
   const DOT_RADIUS = Math.max(1.75, 2.25 * sizeFactor);
 
@@ -318,7 +318,7 @@ function render() {
       .attr('x', centroid[0]).attr('y', centroid[1])
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
       .attr('font-family', "'Roboto', Arial, sans-serif")
-      .attr('font-size', r > 18 ? '20px' : '16px')
+      .attr('font-size', r > 18 ? '30px' : '24px')
       .attr('font-weight', '700').attr('fill', isHighlighted ? '#fff' : '#7a1a10')
       .attr('pointer-events', 'none')
       .text(cases);
