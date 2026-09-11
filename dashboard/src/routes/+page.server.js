@@ -1,4 +1,11 @@
-import { readCasesByCounty, countyTotals, countiesWithData } from '$lib/server/data.js';
+import {
+	readCasesByCounty,
+	countyTotals,
+	countiesWithData,
+	readWeeklySummary,
+	weeklyHospitalizationTrend,
+	ageGroupSeries
+} from '$lib/server/data.js';
 
 export const prerender = true;
 
@@ -12,6 +19,9 @@ export function load() {
 		totals,
 		totalCases,
 		lastUpdated,
-		countiesWithData: countiesWithData(rows)
+		countiesWithData: countiesWithData(rows),
+		weeklyCases: readWeeklySummary(),
+		weeklyHospitalizations: weeklyHospitalizationTrend(),
+		ageGroups: ageGroupSeries()
 	};
 }

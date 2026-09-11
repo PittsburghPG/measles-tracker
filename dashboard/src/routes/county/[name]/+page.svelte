@@ -1,6 +1,5 @@
 <script>
-	import LineChart from '$lib/LineChart.svelte';
-	import BarChart from '$lib/BarChart.svelte';
+	import WeeklyTrendChart from '$lib/WeeklyTrendChart.svelte';
 
 	let { data } = $props();
 
@@ -20,13 +19,8 @@
 <div class="layout">
 	<div class="charts">
 		<section>
-			<h2>Cumulative cases</h2>
-			<LineChart data={data.daily} />
-		</section>
-
-		<section>
-			<h2>Weekly reports</h2>
-			<BarChart data={data.weekly} />
+			<h2>Weekly reports &amp; cumulative cases</h2>
+			<WeeklyTrendChart data={data.weekly} unitLabel="case" />
 		</section>
 	</div>
 

@@ -1,5 +1,7 @@
 <script>
 	import MapChart from '$lib/MapChart.svelte';
+	import WeeklyTrendChart from '$lib/WeeklyTrendChart.svelte';
+	import AgeGroupChart from '$lib/AgeGroupChart.svelte';
 
 	let { data } = $props();
 </script>
@@ -16,6 +18,23 @@
 
 <MapChart totals={data.totals} />
 
+<div class="trio">
+	<section>
+		<h2>Hospitalizations over time</h2>
+		<WeeklyTrendChart data={data.weeklyHospitalizations} unitLabel="hospitalization" />
+	</section>
+
+	<section>
+		<h2>Cases by age group</h2>
+		<AgeGroupChart data={data.ageGroups} />
+	</section>
+
+	<section>
+		<h2>Cases over time</h2>
+		<WeeklyTrendChart data={data.weeklyCases} unitLabel="case" />
+	</section>
+</div>
+
 <style>
 	h1 {
 		font-size: 26px;
@@ -26,5 +45,22 @@
 		color: #555;
 		margin-bottom: 20px;
 		max-width: 640px;
+	}
+
+	.trio {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 28px;
+		margin-top: 36px;
+	}
+
+	.trio section {
+		flex: 1 1 260px;
+		min-width: 0;
+	}
+
+	.trio h2 {
+		font-size: 15px;
+		margin-bottom: 10px;
 	}
 </style>

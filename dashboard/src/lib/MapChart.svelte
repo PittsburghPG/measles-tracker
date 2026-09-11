@@ -56,8 +56,8 @@
 
 		const maxCases = d3.max(Object.values(totals)) || 1;
 		const sizeFactor = Math.sqrt(Math.min(1, VIEW_W / 680));
-		const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 34 * sizeFactor]);
-		const rScale = (v) => Math.max(6, 7.5 * sizeFactor, rScaleRaw(v));
+		const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 46 * sizeFactor]);
+		const rScale = (v) => Math.max(9, 10 * sizeFactor, rScaleRaw(v));
 		const LABEL_MIN = 5;
 		const DOT_RADIUS = Math.max(1.75, 2.25 * sizeFactor);
 
