@@ -76,9 +76,12 @@
   .bubble.dot      { fill: none; stroke-width: 1.25px; transition: stroke-width 0.1s; }
   .bubble.dot:hover{ stroke-width: 2.5px; }
   /* Pennsylvania is called out via its bubble instead of its state shape —
-     solid and opaque rather than everyone else's translucent fill. */
-  .bubble.highlight, .bubble.highlight:hover { fill: #7a1a10; fill-opacity: 1; stroke: #7a1a10; }
-  .bubble.dot.highlight, .bubble.dot.highlight:hover { fill: #7a1a10; stroke: #7a1a10; }
+     more opaque than everyone else's at rest, and darkening further on
+     hover just like theirs, but still a lighter fill than its own solid
+     stroke (not fully opaque). */
+  .bubble.highlight       { fill: #7a1a10; fill-opacity: 0.55; stroke: #7a1a10; }
+  .bubble.highlight:hover { fill-opacity: 0.8; }
+  .bubble.dot.highlight   { fill: #7a1a10; stroke: #7a1a10; }
 
   #tooltip {
     position: fixed;
@@ -316,7 +319,7 @@ function render() {
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
       .attr('font-family', "'Roboto', Arial, sans-serif")
       .attr('font-size', r > 18 ? '13px' : '11px')
-      .attr('font-weight', '700').attr('fill', isHighlighted ? '#fff' : '#7a1a10')
+      .attr('font-weight', '700').attr('fill', '#7a1a10')
       .attr('pointer-events', 'none')
       .text(cases);
   });
