@@ -23,14 +23,44 @@
 	function render() {
 		if (!container || !svgEl || data.length === 0) return;
 
-		const margin = { top: 20, right: 16, bottom: 32, left: 36 };
+		const margin = { top: 30, right: 16, bottom: 32, left: 36 };
 		const totalW = container.getBoundingClientRect().width || 640;
-		const totalH = 220;
+		const totalH = 230;
 		const w = totalW - margin.left - margin.right;
 		const h = totalH - margin.top - margin.bottom;
 
 		const svg = d3.select(svgEl).attr('viewBox', `0 0 ${totalW} ${totalH}`).attr('width', totalW).attr('height', totalH);
 		svg.selectAll('*').remove();
+
+		// Color key, aligned to the SVG's left edge — matches
+		// visualizations/weekly-trend-embed.html's legend. The "cumulative"
+		// swatch's x-position is derived from the actual rendered width of
+		// the "weekly new" label (rather than a hardcoded offset, as the
+		// embed uses) since unitLabel's length varies by caller.
+		const legend = svg.append('g').attr('transform', 'translate(0, 6)');
+		legend.append('rect').attr('class', 'legend-swatch-bar').attr('width', 10).attr('height', 10).attr('y', 1);
+		const barLabel = legend
+			.append('text')
+			.attr('class', 'axis-text legend-text')
+			.attr('x', 14)
+			.attr('y', 10)
+			.text(`Weekly new ${unitLabel}s`);
+		const lineStart = 14 + barLabel.node().getComputedTextLength() + 16;
+		legend
+			.append('line')
+			.attr('class', 'legend-swatch-line')
+			.attr('x1', lineStart)
+			.attr('x2', lineStart + 12)
+			.attr('y1', 6)
+			.attr('y2', 6);
+		legend.append('circle').attr('class', 'legend-swatch-dot').attr('cx', lineStart + 6).attr('cy', 6).attr('r', 3);
+		legend
+			.append('text')
+			.attr('class', 'axis-text legend-text')
+			.attr('x', lineStart + 16)
+			.attr('y', 10)
+			.text(`Cumulative ${unitLabel}s`);
+
 		const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
 		const weekDates = data.map((d) => parseWeek(d.week_start));
@@ -250,6 +280,24 @@
 		font-family: 'Roboto', Arial, sans-serif;
 		font-size: 12px;
 		fill: #888;
+	}
+
+	:global(.legend-text) {
+		fill: #555;
+	}
+
+	:global(.legend-swatch-bar) {
+		fill: #a93226;
+		opacity: 0.75;
+	}
+
+	:global(.legend-swatch-line) {
+		stroke: #1a1a1a;
+		stroke-width: 2;
+	}
+
+	:global(.legend-swatch-dot) {
+		fill: #1a1a1a;
 	}
 
 	.tooltip {

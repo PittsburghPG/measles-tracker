@@ -71,58 +71,44 @@ export function readWeeklySummary() {
 		.sort((a, b) => a.week_start.localeCompare(b.week_start));
 }
 
-function readHospitalizationTotals() {
-	return readTsv(path.join(DATA_DIR, 'hospitalization_by_age_group.tsv'))
-		.filter((row) => row.category === 'total')
-		.map((row) => ({
-			date: row.date,
-			new_hospitalizations: Number(row.new_hospitalizations || 0),
-			cumulative_hospitalizations: Number(row.cumulative_hospitalizations)
-		}))
-		.sort((a, b) => a.date.localeCompare(b.date));
-}
-
-// Weekly statewide hospitalizations, in the same { week_start, new,
-// cumulative } shape as weeklyForCounty()/readWeeklySummary(). Unlike those,
-// `cumulative` isn't recomputed from a running sum — it's the actual
-// cumulative_hospitalizations already recorded for the last day observed in
-// that week (hospitalization_by_age_group.tsv gets a row every scrape run,
-// with no skipped days, so there's no gap to fill).
-export function weeklyHospitalizationTrend() {
-	const byWeek = new Map();
-	for (const row of readHospitalizationTotals()) {
-		const wk = weekStart(row.date);
-		const bucket = byWeek.get(wk) ?? { new: 0, cumulative: 0 };
-		bucket.new += row.new_hospitalizations;
-		bucket.cumulative = row.cumulative_hospitalizations;
-		byWeek.set(wk, bucket);
-	}
-	return [...byWeek.entries()]
-		.map(([week_start, v]) => ({ week_start, new: v.new, cumulative: v.cumulative }))
-		.sort((a, b) => a.week_start.localeCompare(b.week_start));
+// Statewide hospitalization totals as of the most recent date recorded,
+// broken out by hospitalization_by_age_group.tsv's three categories — for
+// the "Total hospitalizations" stat card, not a time series.
+export function latestHospitalizationBreakdown() {
+	const rows = readTsv(path.join(DATA_DIR, 'hospitalization_by_age_group.tsv'));
+	const asOf = rows.reduce((max, row) => (row.date > max ? row.date : max), '');
+	const byCategory = Object.fromEntries(
+		rows.filter((row) => row.date === asOf).map((row) => [row.category, Number(row.cumulative_hospitalizations)])
+	);
+	return {
+		asOf,
+		total: byCategory.total ?? 0,
+		children: byCategory.children ?? 0,
+		adult: byCategory.adult ?? 0
+	};
 }
 
 const AGE_GROUP_ORDER = ['0-4', '5-9', '10-17', '18-24', '25-49', '50-64', '65+', 'Unk'];
 
-// One time series per age group: { age_group, points: [{ date, cumulative_cases }] }.
-// Each group's own rows are already sparse (cases_by_age_group.tsv only
-// writes a row when that group's count changes), which is fine for
-// rendering — AgeGroupChart draws a step line, so gaps between two known
-// points render as flat, not as missing data.
-export function ageGroupSeries() {
-	const rows = readTsv(path.join(DATA_DIR, 'cases_by_age_group.tsv'))
-		.map((row) => ({ date: row.date, age_group: row.age_group, cumulative_cases: Number(row.cumulative_cases) }))
-		.sort((a, b) => a.date.localeCompare(b.date));
+// Statewide case totals as of each age group's most recent recorded
+// cumulative_cases — for the "Total cases" stat card's age breakdown, not a
+// time series.
+export function latestAgeGroupBreakdown() {
+	const rows = readTsv(path.join(DATA_DIR, 'cases_by_age_group.tsv')).map((row) => ({
+		date: row.date,
+		age_group: row.age_group,
+		cumulative_cases: Number(row.cumulative_cases)
+	}));
 
-	const byGroup = new Map();
+	const latest = new Map();
 	for (const row of rows) {
-		if (!byGroup.has(row.age_group)) byGroup.set(row.age_group, []);
-		byGroup.get(row.age_group).push({ date: row.date, cumulative_cases: row.cumulative_cases });
+		const current = latest.get(row.age_group);
+		if (!current || row.date > current.date) latest.set(row.age_group, row);
 	}
 
-	return AGE_GROUP_ORDER.filter((group) => byGroup.has(group)).map((age_group) => ({
+	return AGE_GROUP_ORDER.filter((group) => latest.has(group)).map((age_group) => ({
 		age_group,
-		points: byGroup.get(age_group)
+		cases: latest.get(age_group).cumulative_cases
 	}));
 }
 

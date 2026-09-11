@@ -2,7 +2,8 @@
 	import * as d3 from 'd3';
 	import { goto } from '$app/navigation';
 	import { PA_TOPOLOGY, PA_FIPS } from '$lib/paCounties.js';
-	import { feature as topoFeature } from 'topojson-client';
+	import { TRANSMISSION_COUNTIES } from '$lib/transmissionCounties.js';
+	import { feature as topoFeature, mesh as topoMesh } from 'topojson-client';
 
 	let { totals } = $props();
 
@@ -64,18 +65,60 @@
 		svg.selectAll('*').remove();
 		const g = svg.append('g');
 
+		const defs = svg.append('defs');
+		defs
+			.append('pattern')
+			.attr('id', 'hatch-transmission')
+			.attr('patternUnits', 'userSpaceOnUse')
+			.attr('width', 6)
+			.attr('height', 6)
+			.attr('patternTransform', 'rotate(45)')
+			.call((p) => p.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#dba99c'))
+			.call((p) =>
+				p
+					.append('line')
+					.attr('x1', 0)
+					.attr('y1', 0)
+					.attr('x2', 0)
+					.attr('y2', 6)
+					.attr('stroke', '#c8886f')
+					.attr('stroke-width', 1)
+			);
+
 		g.selectAll('path.county')
 			.data(paCounties.features)
 			.join('path')
 			.attr('class', (d) => {
 				const name = PA_FIPS[d.id];
-				return casesFor(name) > 0 ? 'county affected' : 'county';
+				let cls = casesFor(name) > 0 ? 'county affected' : 'county';
+				if (TRANSMISSION_COUNTIES.includes(name)) cls += ' transmission';
+				return cls;
 			})
 			.attr('d', path)
 			.style('cursor', (d) => (casesFor(PA_FIPS[d.id]) > 0 ? 'pointer' : 'default'))
 			.on('mousemove', (event, d) => showTip(event, PA_FIPS[d.id]))
 			.on('mouseleave', hideTip)
 			.on('click', (event, d) => selectCounty(PA_FIPS[d.id]));
+
+		// Meshing the topology (rather than stroking each transmission county
+		// individually) means a shared border between two ADJACENT
+		// transmission counties doesn't get drawn at all — only the true
+		// outer perimeter of the cluster does, however the counties in it are
+		// shaped or arranged. See visualizations/map-combined-embed.html.
+		const inTransmissionSet = (f) => !!f && TRANSMISSION_COUNTIES.includes(PA_FIPS[f.id]);
+		const transmissionOutline = topoMesh(PA_TOPOLOGY, PA_TOPOLOGY.objects.counties, (a, b) => {
+			const aIn = inTransmissionSet(a),
+				bIn = inTransmissionSet(b);
+			return aIn !== bIn || (a === b && aIn);
+		});
+		g.append('path')
+			.datum(transmissionOutline)
+			.attr('d', path)
+			.attr('fill', 'none')
+			.attr('stroke', '#a93226')
+			.attr('stroke-width', 1.5)
+			.attr('stroke-linejoin', 'round')
+			.attr('pointer-events', 'none');
 
 		const centroids = paCounties.features.map((f) => ({
 			name: PA_FIPS[f.id],
@@ -141,6 +184,11 @@
 	{/if}
 </div>
 
+<div class="legend">
+	<span class="legend-item"><span class="swatch swatch-hatch"></span>Active local transmission</span>
+	<span class="legend-item"><span class="swatch swatch-affected"></span>Cases reported</span>
+</div>
+
 <style>
 	.map-wrap {
 		position: relative;
@@ -160,6 +208,10 @@
 
 	:global(.county.affected) {
 		fill: #f0ddd5;
+	}
+
+	:global(.county.transmission) {
+		fill: url(#hatch-transmission);
 	}
 
 	:global(.bubble) {
@@ -203,5 +255,36 @@
 	.tooltip .hint {
 		color: #ccc;
 		font-size: 11px;
+	}
+
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 18px;
+		margin-top: 10px;
+		font-size: 12px;
+		color: #555;
+	}
+
+	.legend-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.swatch {
+		width: 14px;
+		height: 14px;
+		border-radius: 2px;
+		display: inline-block;
+	}
+
+	.swatch-hatch {
+		background: repeating-linear-gradient(45deg, #dba99c 0 2px, #c8886f 2px 3px);
+		border: 1px solid #a93226;
+	}
+
+	.swatch-affected {
+		background: #f0ddd5;
 	}
 </style>

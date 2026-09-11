@@ -3,8 +3,8 @@ import {
 	countyTotals,
 	countiesWithData,
 	readWeeklySummary,
-	weeklyHospitalizationTrend,
-	ageGroupSeries
+	latestAgeGroupBreakdown,
+	latestHospitalizationBreakdown
 } from '$lib/server/data.js';
 
 export const prerender = true;
@@ -21,7 +21,7 @@ export function load() {
 		lastUpdated,
 		countiesWithData: countiesWithData(rows),
 		weeklyCases: readWeeklySummary(),
-		weeklyHospitalizations: weeklyHospitalizationTrend(),
-		ageGroups: ageGroupSeries()
+		ageBreakdown: latestAgeGroupBreakdown(),
+		hospitalization: latestHospitalizationBreakdown()
 	};
 }
