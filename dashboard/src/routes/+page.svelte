@@ -8,15 +8,22 @@
 	// for the stat card — the raw codes (e.g. "0-4") read ambiguously
 	// out of context.
 	const AGE_GROUP_LABELS = {
-		'0-4': '0 to 4 years old',
-		'5-9': '5 to 9 years old',
-		'10-17': '10 to 17 years old',
-		'18-24': '18 to 24 years old',
-		'25-49': '25 to 49 years old',
-		'50-64': '50 to 64 years old',
+		'0-4': '0 to 4',
+		'5-9': '5 to 9',
+		'10-17': '10 to 17',
+		'18-24': '18 to 24',
+		'25-49': '25 to 49',
+		'50-64': '50 to 64',
 		'65+': '65 and older',
 		Unk: 'Unknown age'
 	};
+
+	const lastUpdatedFormatted = new Date(data.lastUpdated + 'T00:00:00Z').toLocaleDateString('en-US', {
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		timeZone: 'UTC'
+	});
 
 	// PDOH's dashboard doesn't expose a deaths count the scraper can walk —
 	// this is hand-entered from their public reporting and needs updating by
@@ -29,11 +36,10 @@
 	<title>PA measles tracker</title>
 </svelte:head>
 
-<h1>Pennsylvania measles tracker</h1>
-<p class="subhead">
-	{data.totalCases} case{data.totalCases === 1 ? '' : 's'} reported across {Object.keys(data.totals).length} counties
-	as of {data.lastUpdated}. Hover a county for its total; click a county with cases for its full history.
-</p>
+<header class="page-header">
+	<h1>Pennsylvania measles tracker</h1>
+	<p class="updated">Last updated {lastUpdatedFormatted}</p>
+</header>
 
 <div class="cards">
 	<div class="card">
@@ -64,21 +70,27 @@
 
 <MapChart totals={data.totals} />
 
+<hr class="divider" />
+
 <section class="weekly">
 	<h2>Cases over time</h2>
 	<WeeklyTrendChart data={data.weeklyCases} unitLabel="case" />
 </section>
 
 <style>
+	.page-header {
+		text-align: center;
+		margin-bottom: 28px;
+	}
+
 	h1 {
 		font-size: 26px;
 		margin-bottom: 6px;
 	}
 
-	.subhead {
+	.updated {
 		color: #555;
-		margin-bottom: 20px;
-		max-width: 640px;
+		font-size: 13px;
 	}
 
 	.cards {
@@ -137,8 +149,14 @@
 		color: #333;
 	}
 
+	.divider {
+		border: none;
+		border-top: 1px solid #eee;
+		margin: 28px 0 0;
+	}
+
 	.weekly {
-		margin-top: 36px;
+		margin-top: 28px;
 	}
 
 	.weekly h2 {

@@ -172,6 +172,11 @@
 	});
 </script>
 
+<div class="legend">
+	<span class="legend-item"><span class="swatch swatch-hatch"></span>Active local transmission</span>
+	<span class="legend-item"><span class="swatch swatch-affected"></span>Cases reported</span>
+</div>
+
 <div class="map-wrap" bind:this={container}>
 	<svg bind:this={svgEl} role="img" aria-label="Map of measles cases by Pennsylvania county"></svg>
 
@@ -182,11 +187,6 @@
 			{#if tooltip.cases > 0}<br /><span class="hint">Click for details</span>{/if}
 		</div>
 	{/if}
-</div>
-
-<div class="legend">
-	<span class="legend-item"><span class="swatch swatch-hatch"></span>Active local transmission</span>
-	<span class="legend-item"><span class="swatch swatch-affected"></span>Cases reported</span>
 </div>
 
 <style>
@@ -261,7 +261,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px 18px;
-		margin-top: 10px;
+		margin-bottom: 10px;
 		font-size: 12px;
 		color: #555;
 	}
