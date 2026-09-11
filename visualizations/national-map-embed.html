@@ -71,11 +71,14 @@
 
   .state              { fill: #efefef; stroke: #fff; stroke-width: 0.75px; }
   .state.affected     { fill: #f0ddd5; }
-  .state.highlight    { fill: url(#hatch-pa); stroke: #a93226; stroke-width: 2px; }
   .bubble          { stroke-width: 1px; fill: #a93226; stroke: #a93226; fill-opacity: 0.16; cursor: pointer; transition: fill-opacity 0.1s; }
   .bubble:hover    { fill-opacity: 0.4; }
   .bubble.dot      { fill: none; stroke-width: 1.25px; transition: stroke-width 0.1s; }
   .bubble.dot:hover{ stroke-width: 2.5px; }
+  /* Pennsylvania is called out via its bubble instead of its state shape —
+     solid and opaque rather than everyone else's translucent fill. */
+  .bubble.highlight, .bubble.highlight:hover { fill: #7a1a10; fill-opacity: 1; stroke: #7a1a10; }
+  .bubble.dot.highlight, .bubble.dot.highlight:hover { fill: #7a1a10; stroke: #7a1a10; }
 
   #tooltip {
     position: fixed;
@@ -117,7 +120,7 @@
    needs updating by hand to stay in sync with cases_by_county.tsv, and
    the other states' figures depend on whatever national source this was
    last built from. See conversation/commit history for provenance. */
-  const lastUpdated = "Sep 11, 2026";
+  const lastUpdated = "Sept. 11, 2026";
   const caseData = {
   "Alabama": 1,
   "Alaska": 1,
@@ -173,7 +176,7 @@ const HIGHLIGHT_STATE = "Pennsylvania";
 document.getElementById('dw-title').textContent =
   `Pennsylvania leads the nation in number of measles cases this year`;
 document.getElementById('dw-description').innerHTML =
-  `With <span class="dw-highlight">676 infections</span>, state health officials have reported more cases than any other state this year, surpassing South Carolina and Utah. Nationwide, more than 3,300 infections have been reported this year — the highest number in 35 years.`;
+  `With 676 infections, state health officials have reported more cases than any other state this year, surpassing South Carolina and Utah. Nationwide, more than 3,300 infections have been reported this year — the highest number in 35 years.`;
 document.getElementById('dw-asof').textContent = lastUpdated;
 
 const tip = document.getElementById('tooltip');
@@ -246,49 +249,53 @@ function render() {
   const sizeFactor = Math.sqrt(Math.min(1, VIEW_W / 680));
   const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 34 * sizeFactor]);
   const rScale = v => Math.max(6, 7 * sizeFactor, rScaleRaw(v));
-  const LABEL_MIN = 10;
+  const LABEL_MIN = 51;
   const DOT_RADIUS = Math.max(1.75, 2.25 * sizeFactor);
 
   const svg = d3.select('#map-svg');
   svg.selectAll('*').remove();
-
-  // Hatch pattern for Pennsylvania — same look as the PA county map's
-  // active-transmission counties, reused here to call out the one state
-  // this whole map is about.
-  const defs = svg.append('defs');
-  defs.append('pattern')
-    .attr('id', 'hatch-pa')
-    .attr('patternUnits', 'userSpaceOnUse')
-    .attr('width', 6).attr('height', 6)
-    .attr('patternTransform', 'rotate(45)')
-    .call(p => p.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#dba99c'))
-    .call(p => p.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6)
-      .attr('stroke', '#c8886f').attr('stroke-width', 1));
-
   const g = svg.append('g');
 
   g.selectAll('.state')
     .data(usStates.features)
     .join('path')
-    .attr('class', d => {
-      const name = d.properties.name;
-      let cls = caseData[name] ? 'state affected' : 'state';
-      if (name === HIGHLIGHT_STATE) cls += ' highlight';
-      return cls;
-    })
+    .attr('class', d => (caseData[d.properties.name] ? 'state affected' : 'state'))
     .attr('d', path);
+
+  // A state's overall centroid (area-weighted across every part of a
+  // MultiPolygon) can land somewhere that reads as "wrong" for a state
+  // whose shape has small outlying parts — Michigan's centroid falls in
+  // the lake between its two peninsulas, Alaska's and Louisiana's get
+  // dragged toward scattered small islands, Florida's toward the Keys.
+  // Using just the largest ring's centroid instead puts the bubble on the
+  // state's actual main landmass.
+  function mainLandmassCentroid(feature) {
+    if (feature.geometry.type !== 'MultiPolygon') return path.centroid(feature);
+    let best = null, bestArea = -Infinity;
+    for (const coordinates of feature.geometry.coordinates) {
+      const ring = { type: 'Feature', geometry: { type: 'Polygon', coordinates } };
+      const area = Math.abs(path.area(ring));
+      if (area > bestArea) {
+        bestArea = area;
+        best = ring;
+      }
+    }
+    return path.centroid(best);
+  }
 
   // Bubbles + labels
   Object.entries(caseData).forEach(([name, cases]) => {
     if (cases === 0) return;
     const feature = usStates.features.find(f => f.properties.name === name);
     if (!feature) return;
-    const centroid = path.centroid(feature);
+    const centroid = mainLandmassCentroid(feature);
     if (!isFinite(centroid[0]) || !isFinite(centroid[1])) return;
+
+    const isHighlighted = name === HIGHLIGHT_STATE;
 
     if (cases < LABEL_MIN) {
       g.append('circle')
-        .attr('class', 'bubble dot')
+        .attr('class', `bubble dot${isHighlighted ? ' highlight' : ''}`)
         .attr('cx', centroid[0]).attr('cy', centroid[1]).attr('r', DOT_RADIUS)
         .on('mouseover', e => showTip(e, name, cases))
         .on('mousemove', moveTip)
@@ -298,7 +305,7 @@ function render() {
 
     const r = rScale(cases);
     g.append('circle')
-      .attr('class', 'bubble')
+      .attr('class', `bubble${isHighlighted ? ' highlight' : ''}`)
       .attr('cx', centroid[0]).attr('cy', centroid[1]).attr('r', r)
       .on('mouseover', e => showTip(e, name, cases))
       .on('mousemove', moveTip)
@@ -309,7 +316,7 @@ function render() {
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
       .attr('font-family', "'Roboto', Arial, sans-serif")
       .attr('font-size', r > 18 ? '13px' : '11px')
-      .attr('font-weight', '700').attr('fill', '#7a1a10')
+      .attr('font-weight', '700').attr('fill', isHighlighted ? '#fff' : '#7a1a10')
       .attr('pointer-events', 'none')
       .text(cases);
   });
