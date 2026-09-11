@@ -32,7 +32,7 @@ DEFAULT_TSV         <- "data/measles_daily_county.tsv"
 WEEKLY_TSV          <- "data/measles_weekly.tsv"
 AGE_GROUP_TSV       <- "data/measles_daily_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/measles_daily_hospitalization.tsv"
-TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "source", "outbreak")
+TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
 MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
@@ -683,19 +683,21 @@ load_tsv_data <- function(path) {
     message("TSV not found at '", path, "' — will create a new one on first write")
     return(
       tibble(
-        date             = character(),
-        county           = character(),
-        new_cases        = integer(),
-        cumulative_cases = integer(),
-        source           = character(),
-        outbreak         = integer()
+        date                      = character(),
+        county                    = character(),
+        new_cases                 = integer(),
+        cumulative_cases          = integer(),
+        cumulative_outbreak_cases = integer(),
+        source                    = character(),
+        outbreak                  = integer()
       )
     )
   }
   df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
-  df$new_cases        <- as.integer(df$new_cases)
-  df$outbreak         <- as.integer(df$outbreak)
-  df$cumulative_cases <- as.integer(df$cumulative_cases)
+  df$new_cases                 <- as.integer(df$new_cases)
+  df$outbreak                  <- as.integer(df$outbreak)
+  df$cumulative_cases          <- as.integer(df$cumulative_cases)
+  df$cumulative_outbreak_cases <- as.integer(df$cumulative_outbreak_cases)
   message("Loaded ", nrow(df), " existing rows from '", path, "'")
   df
 }
@@ -889,11 +891,12 @@ save_age_group_tsv <- function(df, path) {
 
 # `snapshot$new_cases` (despite the name, inherited from the PBI table's own
 # column) is actually PDOH's cumulative case count for that county+outbreak,
-# not a "new today" figure — see parse_cases(). It's used below to detect
-# each outbreak's delta, but NOT as `cumulative_cases` directly: that column
-# tracks each county's running total across the whole year (both outbreaks
-# combined), so it's accumulated locally instead — see
-# county_year_totals_from_tsv().
+# not a "new today" figure — see parse_cases(). Below, it's used both to
+# detect each outbreak's delta and, directly, as `cumulative_outbreak_cases`
+# (known_n + delta always equals it exactly, so no separate tracking needed).
+# `cumulative_cases`, in contrast, tracks each county's running total across
+# the whole year (both outbreaks combined), so it's accumulated locally
+# instead — see county_year_totals_from_tsv().
 county_totals_from_tsv <- function(existing, outbreak_num) {
   existing |>
     filter(outbreak == outbreak_num) |>
@@ -939,12 +942,13 @@ build_new_rows <- function(snapshot, existing) {
       year_total_lookup[[county]] <- year_total
 
       new_rows[[length(new_rows) + 1]] <- tibble(
-        date             = today,
-        county           = county,
-        new_cases        = delta,
-        cumulative_cases = year_total,
-        source           = "Scrape of PDOH measles webpage",
-        outbreak         = ob
+        date                      = today,
+        county                    = county,
+        new_cases                 = delta,
+        cumulative_cases          = year_total,
+        cumulative_outbreak_cases = snap_n,
+        source                    = "Scrape of PDOH measles webpage",
+        outbreak                  = ob
       )
     } else if (delta < 0) {
       warning(sprintf(
