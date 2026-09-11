@@ -93,7 +93,6 @@
   #tooltip .tt-state { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
   #tooltip .tt-cases { color: #333; }
   .case-count-label{ pointer-events: none; }
-  .state-label     { font-family: 'Roboto', Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #7a1a10; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -171,19 +170,10 @@
 
 const HIGHLIGHT_STATE = "Pennsylvania";
 
-const sortedStates = Object.entries(caseData).sort((a, b) => b[1] - a[1]);
-const paCases = caseData[HIGHLIGHT_STATE] || 0;
-const paRank = sortedStates.findIndex(([name]) => name === HIGHLIGHT_STATE) + 1;
-const runnerUp = sortedStates.find(([name]) => name !== HIGHLIGHT_STATE);
-
 document.getElementById('dw-title').textContent =
-  paRank === 1
-    ? `Pennsylvania's measles outbreak is now the worst in the nation`
-    : `Pennsylvania's measles outbreak ranks among the worst in the nation`;
+  `Pennsylvania leads the nation in number of measles cases this year`;
 document.getElementById('dw-description').innerHTML =
-  paRank === 1
-    ? `With <span class="dw-highlight">${paCases} cases</span> reported so far this year, Pennsylvania has more measles cases than any other state — ahead of ${runnerUp[0]}, which has reported ${runnerUp[1]}.`
-    : `Pennsylvania has reported ${paCases} measles cases this year, ranking ${paRank}${paRank === 2 ? 'nd' : paRank === 3 ? 'rd' : 'th'} among states. ${runnerUp[0]} has reported the most, with ${runnerUp[1]}.`;
+  `With <span class="dw-highlight">676 infections</span>, state health officials have reported more cases than any other state this year, surpassing South Carolina and Utah. Nationwide, more than 3,300 infections have been reported this year — the highest number in 35 years.`;
 document.getElementById('dw-asof').textContent = lastUpdated;
 
 const tip = document.getElementById('tooltip');
@@ -254,8 +244,8 @@ function render() {
   // Northeast corridor especially), the same size range overlapped badly.
   const maxCases = d3.max(Object.values(caseData));
   const sizeFactor = Math.sqrt(Math.min(1, VIEW_W / 680));
-  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 26 * sizeFactor]);
-  const rScale = v => Math.max(5, 6 * sizeFactor, rScaleRaw(v));
+  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 34 * sizeFactor]);
+  const rScale = v => Math.max(6, 7 * sizeFactor, rScaleRaw(v));
   const LABEL_MIN = 10;
   const DOT_RADIUS = Math.max(1.75, 2.25 * sizeFactor);
 
@@ -322,16 +312,6 @@ function render() {
       .attr('font-weight', '700').attr('fill', '#7a1a10')
       .attr('pointer-events', 'none')
       .text(cases);
-
-    // Pennsylvania is the one state named directly on the map — everyone
-    // else is identified only via hover/tooltip, same as non-transmission
-    // counties on the PA map.
-    if (name === HIGHLIGHT_STATE) {
-      g.append('text').attr('class', 'state-label')
-        .attr('x', centroid[0]).attr('y', centroid[1] + r + 13)
-        .attr('text-anchor', 'middle')
-        .text(name);
-    }
   });
 }
 
