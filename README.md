@@ -6,11 +6,12 @@ This project checks the Pennsylvania Department of Health's (PDOH) website every
 
 A scheduled job runs every day at 5:05pm ET:
 
-1. The scraper checks PDOH's measles page and compares the numbers it finds there to what's already saved in `measles_daily_county.tsv`
-2. If a county's case count went up, it adds a new row to `measles_daily_county.tsv` for that increase, recording that county's running case total for the year (across both outbreaks) as `cumulative_cases` and its running total for that outbreak alone as `cumulative_outbreak_cases`
-3. It then updates `measles_weekly.tsv`: for each week, it adds up that week's new cases from `measles_daily_county.tsv`, skipping any week we've corrected by hand, and recomputes `cumulative_cases` as a running total across all weeks
-4. It also updates `measles_daily_age_group.tsv`: PDOH's dashboard only exposes a statewide year-to-date cumulative case count broken out by age group (not by day), so each run compares each age group's cumulative total (`cumulative_cases`) to what's already recorded and, for any group that went up, adds a row for the increase (`new_cases`)
-5. It also updates `measles_daily_hospitalization.tsv`: PDOH's Hospitalization tab exposes a statewide running total broken out into three cards — total, under 18 ("children"), and 18+ ("adult") — but not by day or county, so each run adds one row per category, recording that category's total as `cumulative_hospitalizations` and working out `new_hospitalizations` by diffing it against that category's most recent prior day's cumulative total on record
+1. The scraper checks PDOH's measles page and compares the numbers it finds there to what's already saved in `cases_by_county.tsv`
+2. If a county's case count went up, it adds a new row to `cases_by_county.tsv` for that increase, recording that county's running case total for the year (across both outbreaks) as `cumulative_cases` and its running total for that outbreak alone as `cumulative_outbreak_cases`
+3. It then updates `summary_weekly.tsv`: for each week, it adds up that week's new cases from `cases_by_county.tsv`, skipping any week we've corrected by hand, and recomputes `cumulative_cases` as a running total across all weeks
+4. It also updates `cases_by_age_group.tsv`: PDOH's dashboard only exposes a statewide year-to-date cumulative case count broken out by age group (not by day), so each run compares each age group's cumulative total (`cumulative_cases`) to what's already recorded and, for any group that went up, adds a row for the increase (`new_cases`)
+5. It also updates `hospitalization_by_age_group.tsv`: PDOH's Hospitalization tab exposes a statewide running total broken out into three cards — total, under 18 ("children"), and 18+ ("adult") — but not by day or county, so each run adds one row per category, recording that category's total as `cumulative_hospitalizations` and working out `new_hospitalizations` by diffing it against that category's most recent prior day's cumulative total on record
+6. Finally, it updates `summary_daily.tsv`: one row per day of statewide totals only — `new_cases`/`cumulative_cases` rolled up across all counties, plus that day's `new_hospitalizations`/`cumulative_hospitalizations` from the "total" category above — so you can see where things stand at a glance without wading through the per-county or per-category files. `cumulative_cases` is recomputed from scratch each run as the sum of every `new_cases` ever recorded in `cases_by_county.tsv`, so it can't drift out of sync
 
 You can also run it manually: **Actions → Scrape → Run workflow**
 
@@ -21,10 +22,11 @@ measles-tracker/
 ├── scraper/
 │   └── measles_scraper.R     
 ├── data/
-│   ├── measles_daily_county.tsv
-│   ├── measles_weekly.tsv     
-│   ├── measles_daily_age_group.tsv
-│   └── measles_daily_hospitalization.tsv
+│   ├── cases_by_county.tsv
+│   ├── cases_by_age_group.tsv
+│   ├── hospitalization_by_age_group.tsv
+│   ├── summary_daily.tsv
+│   └── summary_weekly.tsv
 └── .github/
     └── workflows/
         └── scrape.yml
@@ -32,13 +34,15 @@ measles-tracker/
 
 ## Known limitations
 
-PDOH changed how it displayed new cases on its website in early July 2026, which broke the scraper from July 8–24, 2026. That gap is filled in `measles_daily_county.tsv` as one row per county, all dated July 24, 2026 (the day the scraper caught up) rather than broken out day by day. In all, 38 cases were confirmed during this 16-day gap.  
+PDOH changed how it displayed new cases on its website in early July 2026, which broke the scraper from July 8–24, 2026. That gap is filled in `cases_by_county.tsv` as one row per county, all dated July 24, 2026 (the day the scraper caught up) rather than broken out day by day. In all, 38 cases were confirmed during this 16-day gap.  
 
-Left alone, all cases  would land in the week of July 20, 2026 in `measles_weekly.tsv`, creating an artificial spike in cases. PDOH separately reported that 29 new cases were confirmed in the 7 days before July 24, so we used that number to split the 38 by hand: 29 cases to the week of July 20, and the remaining 9 (38 minus 29) to the week of July 13. Those two weeks' `new_cases` values are manually adjusted and excluded from the scraper's usual auto-sync (see `ADJUSTED_WEEKS` in `measles_scraper.R`) so they don't get overwritten on the next run.
+Left alone, all cases  would land in the week of July 20, 2026 in `summary_weekly.tsv`, creating an artificial spike in cases. PDOH separately reported that 29 new cases were confirmed in the 7 days before July 24, so we used that number to split the 38 by hand: 29 cases to the week of July 20, and the remaining 9 (38 minus 29) to the week of July 13. Those two weeks' `new_cases` values are manually adjusted and excluded from the scraper's usual auto-sync (see `ADJUSTED_WEEKS` in `measles_scraper.R`) so they don't get overwritten on the next run.
 
-Hospitalizations were originally tracked weekly (as a `hospitalizations` column on `measles_weekly.tsv`) before `measles_daily_hospitalization.tsv` started tracking them daily, by category, on August 28, 2026. That earlier weekly history wasn't carried over; `measles_daily_hospitalization.tsv` instead starts from a baseline of three rows (August 28, 2026: total 83, children 24, adult 59) and tracks each category day by day from there.
+Hospitalizations were originally tracked weekly (as a `hospitalizations` column on `summary_weekly.tsv`) before `hospitalization_by_age_group.tsv` started tracking them daily, by category, on August 28, 2026. That earlier weekly history wasn't carried over; `hospitalization_by_age_group.tsv` instead starts from a baseline of three rows (August 28, 2026: total 83, children 24, adult 59) and tracks each category day by day from there.
 
-Age-group tracking started August 26, 2026. Each age group's first row in `measles_daily_age_group.tsv` (dated August 26, 2026) leaves `new_cases` blank rather than recording PDOH's full cumulative total as if all of it were new that day — it was just where each group's count already stood when tracking began. `cumulative_cases` on that row still carries the correct starting total.
+Age-group tracking started August 26, 2026. Each age group's first row in `cases_by_age_group.tsv` (dated August 26, 2026) leaves `new_cases` blank rather than recording PDOH's full cumulative total as if all of it were new that day — it was just where each group's count already stood when tracking began. `cumulative_cases` on that row still carries the correct starting total.
+
+`summary_daily.tsv` was backfilled for its full history (starting January 30, 2026, matching `cases_by_county.tsv`'s earliest row) rather than starting from whenever this file was added. Its hospitalization columns are blank for any date before hospitalization tracking began (August 28, 2026), since there's no data to report yet — as opposed to a `0`, which would wrongly imply zero hospitalizations.
 
 ## Local development
 
