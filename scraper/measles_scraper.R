@@ -898,13 +898,19 @@ save_summary_tsv <- function(df, path) {
 
 # Upsert today's row into summary_daily.tsv, or leave it unchanged if
 # neither case count nor hospitalization count actually moved today.
-# `today_new_cases` is the statewide delta actually applied to
-# cases_by_county.tsv this run (0 if nothing changed); `case_daily_df` is
-# that file's full updated state, used to recompute `cumulative_cases` from
-# scratch; `hosp_df` is hospitalization_by_age_group.tsv's updated state,
-# from which today's "total" category row (if any) supplies the
-# hospitalization figures.
-update_daily_summary <- function(summary_df, today, today_new_cases, case_daily_df, hosp_df) {
+# `case_daily_df` is cases_by_county.tsv's full updated state; `today`'s new
+# case total is summed directly from it (every county's rows dated today),
+# not passed in as this run's own diff — the scraper can run more than once
+# on the same calendar day (e.g. a manual run followed by the scheduled
+# one), and a second run's diff is legitimately 0 even though cases_by_
+# county.tsv already holds the day's real total from the earlier run.
+# Deriving it fresh from the full file each time, like `cumulative_cases`
+# below, makes this idempotent no matter how many times it runs today.
+# `hosp_df` is hospitalization_by_age_group.tsv's updated state, from which
+# today's "total" category row (if any) supplies the hospitalization
+# figures.
+update_daily_summary <- function(summary_df, today, case_daily_df, hosp_df) {
+  today_new_cases <- case_daily_df |> filter(date == today) |> pull(new_cases) |> sum(na.rm = TRUE)
   today_hosp    <- hosp_df |> filter(date == today, category == "total")
   new_hosp_today <- if (nrow(today_hosp) > 0) today_hosp$new_hospitalizations[1] else NA_integer_
   hosp_changed  <- !is.na(new_hosp_today) && new_hosp_today != 0
@@ -1241,9 +1247,8 @@ tryCatch({
   # whatever just got saved to cases_by_county.tsv and
   # hospitalization_by_age_group.tsv above (including a failed
   # hospitalization update — hosp_tsv still holds its last-saved state then).
-  today_new_cases <- if (!is.null(new_rows)) sum(new_rows$new_cases) else 0L
   summary_tsv <- load_summary_tsv(SUMMARY_TSV) |>
-    update_daily_summary(today, today_new_cases, updated, hosp_tsv)
+    update_daily_summary(today, updated, hosp_tsv)
   save_summary_tsv(summary_tsv, SUMMARY_TSV)
 
   # Age-group case counts are likewise non-fatal to fetch/update — a failure
