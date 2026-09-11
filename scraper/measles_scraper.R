@@ -852,18 +852,22 @@ update_daily_hospitalizations <- function(hosp_df, today, snapshot) {
     bind_rows(bind_rows(new_rows))
 }
 
-# summary_daily.tsv: one row per day, statewide totals only — a
-# quick-scan complement to cases_by_county.tsv (per-county) and
-# hospitalization_by_age_group.tsv (per-category), which stay
-# in their long, disaggregated form. `cumulative_cases` is recomputed from
+# summary_daily.tsv: one row per day PDOH actually reported a change,
+# statewide totals only — a quick-scan complement to cases_by_county.tsv
+# (per-county) and hospitalization_by_age_group.tsv (per-category), which
+# stay in their long, disaggregated form. A day where neither case count nor
+# hospitalization count moved isn't a real data point — it just means PDOH
+# hadn't published an update yet — so no row is written for it, mirroring
+# cases_by_county.tsv and cases_by_age_group.tsv's "only write a row when
+# something changed" convention. `cumulative_cases` is recomputed from
 # scratch each run as the sum of every `new_cases` ever recorded in
 # cases_by_county.tsv (same "recompute rather than track" approach as
 # summary_weekly.tsv's cumulative_cases), so it can't drift. Hospitalization
 # columns stay blank until hospitalization_by_age_group.tsv's
-# "total" category starts recording (Aug 28, 2026); once it has, a day with
-# no fresh "total" row (e.g. a run where the hospitalization fetch failed)
-# carries its cumulative forward with `new_hospitalizations` of 0, since no
-# new report means no known change since the last one.
+# "total" category starts recording (Aug 28, 2026); once it has, a row still
+# written because cases changed (but whose hospitalization fetch failed that
+# run) carries its cumulative forward with `new_hospitalizations` of 0, since
+# no new report means no known change since the last one.
 SUMMARY_TSV_COLS <- c("date", "new_cases", "cumulative_cases", "new_hospitalizations", "cumulative_hospitalizations")
 
 load_summary_tsv <- function(path) {
@@ -892,16 +896,26 @@ save_summary_tsv <- function(df, path) {
   message("Saved ", nrow(df), " row(s) to '", path, "'")
 }
 
-# Upsert today's row into summary_daily.tsv. `today_new_cases` is the
-# statewide delta actually applied to cases_by_county.tsv this run (0 if
-# nothing changed); `case_daily_df` is that file's full updated state, used
-# to recompute `cumulative_cases` from scratch; `hosp_df` is
-# hospitalization_by_age_group.tsv's updated state, from which
-# today's "total" category row (if any) supplies the hospitalization figures.
+# Upsert today's row into summary_daily.tsv, or leave it unchanged if
+# neither case count nor hospitalization count actually moved today.
+# `today_new_cases` is the statewide delta actually applied to
+# cases_by_county.tsv this run (0 if nothing changed); `case_daily_df` is
+# that file's full updated state, used to recompute `cumulative_cases` from
+# scratch; `hosp_df` is hospitalization_by_age_group.tsv's updated state,
+# from which today's "total" category row (if any) supplies the
+# hospitalization figures.
 update_daily_summary <- function(summary_df, today, today_new_cases, case_daily_df, hosp_df) {
+  today_hosp    <- hosp_df |> filter(date == today, category == "total")
+  new_hosp_today <- if (nrow(today_hosp) > 0) today_hosp$new_hospitalizations[1] else NA_integer_
+  hosp_changed  <- !is.na(new_hosp_today) && new_hosp_today != 0
+
+  if (today_new_cases == 0 && !hosp_changed) {
+    message("No case or hospitalization change today — summary_daily.tsv unchanged")
+    return(summary_df)
+  }
+
   cumulative_cases <- sum(case_daily_df$new_cases, na.rm = TRUE)
 
-  today_hosp <- hosp_df |> filter(date == today, category == "total")
   if (nrow(today_hosp) > 0) {
     new_hosp <- today_hosp$new_hospitalizations[1]
     cum_hosp <- today_hosp$cumulative_hospitalizations[1]
