@@ -69,13 +69,25 @@
     margin: 0 1px;
   }
 
-  .state              { fill: #efefef; stroke: #fff; stroke-width: 0.75px; }
-  .state.affected     { fill: #f0ddd5; }
-  .state.highlight    { stroke: #a93226; stroke-width: 2px; }
-  .bubble          { stroke-width: 1px; fill: #a93226; stroke: #a93226; fill-opacity: 0.16; cursor: pointer; transition: fill-opacity 0.1s; }
-  .bubble:hover    { fill-opacity: 0.4; }
-  .bubble.dot      { fill: none; stroke-width: 1.25px; transition: stroke-width 0.1s; }
-  .bubble.dot:hover{ stroke-width: 2.5px; }
+  .state              { stroke: #fff; stroke-width: 0.75px; cursor: pointer; }
+  .state.highlight    { fill: url(#hatch-pa); stroke: #a93226; stroke-width: 2px; }
+
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: #555;
+  }
+
+  .legend-bar {
+    width: 140px;
+    height: 10px;
+    border-radius: 2px;
+    /* Must match LOW_COLOR/HIGH_COLOR in the script below. */
+    background: linear-gradient(to right, #f7ddd2, #7a1a10);
+  }
 
   #tooltip {
     position: fixed;
@@ -92,13 +104,6 @@
   }
   #tooltip .tt-state { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
   #tooltip .tt-cases { color: #333; }
-  .case-count-label{ pointer-events: none; }
-  /* On narrow (mobile) viewports, small states' numbers get too cramped
-     to read against the shrunk map — only keep labels for the bigger,
-     easier-to-hit bubbles (25+ cases). */
-  @media (max-width: 480px) {
-    .case-count-label.small { display: none; }
-  }
   .state-label     { font-family: 'Roboto', Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #7a1a10; pointer-events: none; }
 </style>
 </head>
@@ -108,9 +113,15 @@
   <h3 class="dw-title" id="dw-title"></h3>
   <p class="dw-description" id="dw-description"></p>
 
+  <div class="legend">
+    <span id="legend-min">1 case</span>
+    <span class="legend-bar"></span>
+    <span id="legend-max"></span>
+  </div>
+
   <svg id="map-svg" viewBox="0 0 680 416"></svg>
 
-  <p class="dw-source">Map: Jimmy Cloutier / Post-Gazette <span class="dw-dot">&bull;</span> Source: Pennsylvania figure from the Pennsylvania Department of Health as of <span id="dw-asof"></span>; other states TK — confirm source/as-of date.</p>
+  <p class="dw-source">Map: Jimmy Cloutier / Post-Gazette <span class="dw-dot">&bull;</span> Sources: Pennsylvania Department of Health, Centers for Disease Control, as of <span id="dw-asof"></span>.</p>
 </div>
 
 <div id="tooltip">
@@ -223,11 +234,12 @@ function render() {
   const VIEW_W = document.querySelector('.dw-chart').getBoundingClientRect().width || 680;
 
   // STATE_TOPOLOGY's coordinates are already Albers-USA-projected pixel
-  // space (not lon/lat), so the "raw" projection here is just an identity
-  // pass-through with the y-axis flipped to match SVG/TopoJSON convention
-  // — same k/tx/ty fit-to-width technique as map-combined-embed.html,
+  // space (not lon/lat) with y already increasing downward, matching SVG —
+  // so the "raw" projection here is just a plain identity pass-through, no
+  // axis flip needed (that was tried and rendered the whole map upside
+  // down). Same k/tx/ty fit-to-width technique as map-combined-embed.html,
   // just with geoIdentity swapped in for geoMercator.
-  const raw = d3.geoIdentity().reflectY(true);
+  const raw = d3.geoIdentity();
   const rawPath = d3.geoPath().projection(raw);
   const [[x0, y0], [x1, y1]] = rawPath.bounds(usStates);
 
@@ -254,73 +266,60 @@ function render() {
   });
   const path = d3.geoPath().projection(projection);
 
-  const maxCases = d3.max(Object.values(caseData));
-  const sizeFactor = Math.sqrt(Math.min(1, VIEW_W / 680));
-  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 46 * sizeFactor]);
-  const rScale = v => Math.max(9, 10 * sizeFactor, rScaleRaw(v));
-  const LABEL_MIN = 5;
-  const DOT_RADIUS = Math.max(1.75, 2.25 * sizeFactor);
+  // Color scale excludes Pennsylvania — it's hatched instead (see below),
+  // not shaded by count, so it shouldn't skew the domain other states are
+  // judged against. LOW_COLOR/HIGH_COLOR must match .legend-bar's gradient
+  // in the <style> block above.
+  const LOW_COLOR = '#f7ddd2';
+  const HIGH_COLOR = '#7a1a10';
+  const otherCases = Object.entries(caseData)
+    .filter(([name]) => name !== HIGHLIGHT_STATE)
+    .map(([, cases]) => cases);
+  const maxOtherCases = d3.max(otherCases);
+  const colorScale = d3.scaleSequentialSqrt(d3.interpolateHcl(LOW_COLOR, HIGH_COLOR)).domain([0, maxOtherCases]);
+  document.getElementById('legend-max').textContent = `${maxOtherCases} cases`;
 
   const svg = d3.select('#map-svg');
   svg.selectAll('*').remove();
+
+  // Hatch pattern for Pennsylvania — same look as the PA county map's
+  // active-transmission counties, reused here to call out the one state
+  // this whole map is about.
+  const defs = svg.append('defs');
+  defs.append('pattern')
+    .attr('id', 'hatch-pa')
+    .attr('patternUnits', 'userSpaceOnUse')
+    .attr('width', 6).attr('height', 6)
+    .attr('patternTransform', 'rotate(45)')
+    .call(p => p.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#dba99c'))
+    .call(p => p.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6)
+      .attr('stroke', '#c8886f').attr('stroke-width', 1));
+
   const g = svg.append('g');
 
   g.selectAll('.state')
     .data(usStates.features)
     .join('path')
-    .attr('class', d => {
-      const name = d.properties.name;
-      let cls = caseData[name] ? 'state affected' : 'state';
-      if (name === HIGHLIGHT_STATE) cls += ' highlight';
-      return cls;
+    .attr('class', d => (d.properties.name === HIGHLIGHT_STATE ? 'state highlight' : 'state'))
+    .attr('fill', d => {
+      if (d.properties.name === HIGHLIGHT_STATE) return null; // set via the .highlight CSS class instead
+      const cases = caseData[d.properties.name];
+      return cases ? colorScale(cases) : '#eee';
     })
-    .attr('d', path);
+    .attr('d', path)
+    .on('mousemove', (e, d) => showTip(e, d.properties.name, caseData[d.properties.name] || 0))
+    .on('mouseleave', hideTip);
 
-  // Bubbles + labels
-  Object.entries(caseData).forEach(([name, cases]) => {
-    if (cases === 0) return;
-    const feature = usStates.features.find(f => f.properties.name === name);
-    if (!feature) return;
-    const centroid = path.centroid(feature);
-    if (!isFinite(centroid[0]) || !isFinite(centroid[1])) return;
-
-    if (cases < LABEL_MIN) {
-      g.append('circle')
-        .attr('class', 'bubble dot')
-        .attr('cx', centroid[0]).attr('cy', centroid[1]).attr('r', DOT_RADIUS)
-        .on('mouseover', e => showTip(e, name, cases))
-        .on('mousemove', moveTip)
-        .on('mouseout', hideTip);
-      return;
-    }
-
-    const r = rScale(cases);
-    g.append('circle')
-      .attr('class', 'bubble')
-      .attr('cx', centroid[0]).attr('cy', centroid[1]).attr('r', r)
-      .on('mouseover', e => showTip(e, name, cases))
-      .on('mousemove', moveTip)
-      .on('mouseout', hideTip);
-
-    g.append('text').attr('class', `case-count-label${cases < 25 ? ' small' : ''}`)
+  // Pennsylvania is the one state named directly on the map — everyone
+  // else is identified only via hover/tooltip.
+  const paFeature = usStates.features.find(f => f.properties.name === HIGHLIGHT_STATE);
+  if (paFeature) {
+    const centroid = path.centroid(paFeature);
+    g.append('text').attr('class', 'state-label')
       .attr('x', centroid[0]).attr('y', centroid[1])
-      .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
-      .attr('font-family', "'Roboto', Arial, sans-serif")
-      .attr('font-size', r > 25 ? '14px' : '12px')
-      .attr('font-weight', '700').attr('fill', '#7a1a10')
-      .attr('pointer-events', 'none')
-      .text(cases);
-
-    // Pennsylvania is the one state named directly on the map — everyone
-    // else is identified only via hover/tooltip, same as non-transmission
-    // counties on the PA map.
-    if (name === HIGHLIGHT_STATE) {
-      g.append('text').attr('class', 'state-label')
-        .attr('x', centroid[0]).attr('y', centroid[1] + r + 14)
-        .attr('text-anchor', 'middle')
-        .text(name);
-    }
-  });
+      .attr('text-anchor', 'middle')
+      .text(`${HIGHLIGHT_STATE} (${caseData[HIGHLIGHT_STATE]})`);
+  }
 }
 
 function reportHeight() {
