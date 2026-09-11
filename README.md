@@ -15,6 +15,10 @@ A scheduled job runs every day at 5:05pm ET:
 
 You can also run it manually: **Actions → Scrape → Run workflow**
 
+## Dashboard
+
+`dashboard/` is a SvelteKit app that browses `data/cases_by_county.tsv`: a statewide map (hover a county for its total, click through to that county's page) and, per county, a cumulative-cases line chart, a weekly-reports bar chart, and the underlying daily data. It's a static site — county pages are prerendered at build time from whatever's in `data/` — so it needs rebuilding (and redeploying) to pick up new scrapes. See `dashboard/README.md` for how to run it.
+
 ## Repo structure
 
 ```
@@ -27,6 +31,8 @@ measles-tracker/
 │   ├── hospitalization_by_age_group.tsv
 │   ├── summary_daily.tsv
 │   └── summary_weekly.tsv
+├── dashboard/
+│   └── ...                   # SvelteKit app, see dashboard/README.md
 └── .github/
     └── workflows/
         └── scrape.yml
