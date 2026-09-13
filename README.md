@@ -11,7 +11,8 @@ A scheduled job runs every day at 5:05pm ET:
 3. It then updates `summary_weekly.tsv`: for each week, it adds up that week's new cases from `cases_by_county.tsv`, skipping any week we've corrected by hand, and recomputes `cumulative_cases` as a running total across all weeks
 4. It also updates `cases_by_age_group.tsv`: PDOH's dashboard only exposes a statewide year-to-date cumulative case count broken out by age group (not by day), so each run compares each age group's cumulative total (`cumulative_cases`) to what's already recorded and, for any group that went up, adds a row for the increase (`new_cases`)
 5. It also updates `hospitalization_by_age_group.tsv`: PDOH's Hospitalization tab exposes a statewide running total broken out into three cards — total, under 18 ("children"), and 18+ ("adult") — but not by day or county, so each run adds one row per category, recording that category's total as `cumulative_hospitalizations` and working out `new_hospitalizations` by diffing it against that category's most recent prior day's cumulative total on record
-6. Finally, it updates `summary_daily.tsv`: statewide totals only — `new_cases`/`cumulative_cases` rolled up across all counties, plus that day's `new_hospitalizations`/`cumulative_hospitalizations` from the "total" category above — so you can see where things stand at a glance without wading through the per-county or per-category files. A row is only added on a day PDOH actually reported a change in cases or hospitalizations; a day with neither isn't a real data point, just PDOH not having published an update yet. `cumulative_cases` is recomputed from scratch each run as the sum of every `new_cases` ever recorded in `cases_by_county.tsv`, so it can't drift out of sync
+6. It also updates `summary_daily.tsv`: statewide totals only — `new_cases`/`cumulative_cases` rolled up across all counties, plus that day's `new_hospitalizations`/`cumulative_hospitalizations` from the "total" category above — so you can see where things stand at a glance without wading through the per-county or per-category files. A row is only added on a day PDOH actually reported a change in cases or hospitalizations; a day with neither isn't a real data point, just PDOH not having published an update yet. `cumulative_cases` is recomputed from scratch each run as the sum of every `new_cases` ever recorded in `cases_by_county.tsv`, so it can't drift out of sync
+7. Finally, it rewrites `summary_county.tsv` from scratch: one row per county, listing just its cumulative case total for the year — a flat lookup table for "how many cases has each county had" without summing `cases_by_county.tsv`'s per-date rows by hand
 
 You can also run it manually: **Actions → Scrape → Run workflow**
 
@@ -26,7 +27,8 @@ measles-tracker/
 │   ├── cases_by_age_group.tsv
 │   ├── hospitalization_by_age_group.tsv
 │   ├── summary_daily.tsv
-│   └── summary_weekly.tsv
+│   ├── summary_weekly.tsv
+│   └── summary_county.tsv
 └── .github/
     └── workflows/
         └── scrape.yml

@@ -33,6 +33,7 @@ WEEKLY_TSV          <- "data/summary_weekly.tsv"
 AGE_GROUP_TSV       <- "data/cases_by_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/hospitalization_by_age_group.tsv"
 SUMMARY_TSV         <- "data/summary_daily.tsv"
+SUMMARY_COUNTY_TSV  <- "data/summary_county.tsv"
 TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
@@ -896,6 +897,24 @@ save_summary_tsv <- function(df, path) {
   message("Saved ", nrow(df), " row(s) to '", path, "'")
 }
 
+# summary_county.tsv: one row per county, showing just its cumulative case
+# total for the year — a flat lookup table complement to
+# cases_by_county.tsv's full per-date history, for anyone who just wants
+# "how many cases has each county had" without summing new_cases rows by
+# hand. Rewritten in full from cases_by_county.tsv every run (same
+# "recompute rather than track" approach as the other summary files), so it
+# can't drift, and only lists counties that have recorded at least one case.
+SUMMARY_COUNTY_COLS <- c("county", "cumulative_cases")
+
+save_summary_county_tsv <- function(case_daily_df, path) {
+  totals <- case_daily_df |>
+    group_by(county) |>
+    summarise(cumulative_cases = sum(new_cases, na.rm = TRUE), .groups = "drop") |>
+    arrange(county)
+  write_tsv(totals[, SUMMARY_COUNTY_COLS], path, na = "")
+  message("Saved ", nrow(totals), " county total(s) to '", path, "'")
+}
+
 # Upsert today's row into summary_daily.tsv, or leave it unchanged if
 # neither case count nor hospitalization count actually moved today.
 # `today_new_cases` is the statewide delta actually applied to
@@ -1224,6 +1243,10 @@ tryCatch({
   weekly_tsv <- load_weekly_tsv(WEEKLY_TSV) |>
     sync_weekly_case_counts(updated)
   save_weekly_tsv(weekly_tsv, WEEKLY_TSV)
+
+  # summary_county.tsv is rewritten in full every run regardless of whether
+  # new_rows is NULL, same as summary_weekly.tsv above.
+  save_summary_county_tsv(updated, SUMMARY_COUNTY_TSV)
 
   # hospitalization_by_age_group.tsv update is non-fatal — if
   # it fails, the case-count sync above still gets saved, just without a
