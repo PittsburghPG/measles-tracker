@@ -70,10 +70,10 @@
   }
 
   .county             { fill: #efefef; stroke: #fff; stroke-width: 0.75px; }
-  .county.affected    { fill: url(#hatch-active); }
+  .county.affected    { fill: #f0ddd5; }
   .county.transmission{ fill: url(#hatch-transmission); stroke: #7a1a10; stroke-width: 1px; }
-  .bubble          { stroke-width: 1px; fill: #a93226; stroke: #a93226; fill-opacity: 0.12; cursor: pointer; transition: fill-opacity 0.1s; }
-  .bubble:hover    { fill-opacity: 0.45; }
+  .bubble          { stroke-width: 1px; fill: #a93226; stroke: #a93226; fill-opacity: 0.16; cursor: pointer; transition: fill-opacity 0.1s; }
+  .bubble:hover    { fill-opacity: 0.4; }
   .bubble.dot      { fill: none; stroke-width: 1.25px; transition: stroke-width 0.1s; }
   .bubble.dot:hover{ stroke-width: 2.5px; }
 
@@ -176,7 +176,7 @@ const TRANSMISSION_COUNTIES = [
 
 const countyCount = Object.keys(caseData).length;
 document.getElementById('dw-title').textContent =
-  `Measles cases have spread to more than two dozen counties`;
+  `Measles infections have been reported in half the state`;
 document.getElementById('dw-description').innerHTML =
   `Measles cases have been reported in ${countyCount} counties this year. State health officials have identified at least ${TRANSMISSION_COUNTIES.length} counties where measles is <span class="dw-highlight">actively circulating</span> and the risk of being infected is highest.`;
 document.getElementById('dw-asof').textContent = lastUpdated;
@@ -304,8 +304,8 @@ function render() {
   // number legibly — otherwise the sqrt scale alone shrinks the smallest
   // labeled counts to a few pixels. Counties below LABEL_MIN don't use this
   // scale at all — they render as a small fixed dot instead (see below).
-  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 38 * sizeFactor]);
-  const rScale = v => Math.max(7, 8.5 * sizeFactor, rScaleRaw(v));
+  const rScaleRaw = d3.scaleSqrt().domain([0, maxCases]).range([0, 46 * sizeFactor]);
+  const rScale = v => Math.max(9, 10 * sizeFactor, rScaleRaw(v));
 
   // Below this many cases, a county gets a small unlabeled dot instead of a
   // numbered bubble — with case counts this high, full bubbles for every
@@ -319,15 +319,6 @@ function render() {
 
   // Hatch pattern
   const defs = svg.append('defs');
-  defs.append('pattern')
-    .attr('id', 'hatch-active')
-    .attr('patternUnits', 'userSpaceOnUse')
-    .attr('width', 6).attr('height', 6)
-    .attr('patternTransform', 'rotate(45)')
-    .call(p => p.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#f0ddd5'))
-    .call(p => p.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6)
-      .attr('stroke', '#e0b8a8').attr('stroke-width', 1));
-
   defs.append('pattern')
     .attr('id', 'hatch-transmission')
     .attr('patternUnits', 'userSpaceOnUse')
