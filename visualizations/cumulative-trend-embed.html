@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Weekly measles cases in Pennsylvania</title>
+<title>Cumulative measles cases in Pennsylvania</title>
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -165,11 +165,6 @@ function draw() {
   const domainEnd   = new Date(d3.max(weekDates).getTime() + msPerWeek * 0.5);
 
   const x = d3.scaleTime().domain([domainStart, domainEnd]).range([0, w]);
-
-  // Pixel width of one week at the current scale, used to size/center bars.
-  const weekPx = w * msPerWeek / (domainEnd - domainStart);
-  const barWidth = weekPx * 0.65;
-  const barX = d => x(parseWeek(d.week_start)) - barWidth / 2;
   const centerX = d => x(parseWeek(d.week_start));
 
   const maxY = d3.max(weeklyData, d => d.cumulative_cases);
@@ -278,36 +273,6 @@ function draw() {
     monthNodes.forEach((node, i) => { if (!keep.has(i)) d3.select(node).remove(); });
   }
 
-  // Bars — weekly new cases
-  g.selectAll('.wbar').data(weeklyData).join('rect')
-    .attr('class', 'wbar')
-    .attr('x', barX).attr('y', d => y(d.new_cases))
-    .attr('width', barWidth).attr('height', d => h - y(d.new_cases))
-    .attr('fill', '#a93226').attr('opacity', 0.75)
-    .style('cursor', 'pointer')
-    .on('mouseover', function (event, d) {
-      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.new_cases} case${d.new_cases !== 1 ? 's' : ''} reported<br>${d.cumulative_cases} cumulative`;
-      tip.style.display = 'block';
-      positionTip(event);
-    })
-    .on('mousemove', positionTip)
-    .on('mouseout', function () {
-      tip.style.display = 'none';
-    });
-
-  // Bar value label — only the most recent week's, since it's the
-  // chart's headline number. Older bars are still readable via tooltip.
-  const mostRecent = weeklyData[weeklyData.length - 1];
-  if (mostRecent.new_cases > 0) {
-    g.selectAll('.wbar-label').data([mostRecent]).join('text')
-      .attr('class', 'wbar-label')
-      .attr('x', centerX)
-      .attr('y', d => y(d.new_cases) - 4)
-      .attr('text-anchor', 'middle')
-      .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#a93226').attr('font-weight', '700')
-      .text(d => d.new_cases);
-  }
-
   // Cumulative line
   const line = d3.line()
     .x(centerX)
@@ -323,9 +288,9 @@ function draw() {
     .attr('class', 'wdot')
     .attr('cx', centerX)
     .attr('cy', d => y(d.cumulative_cases))
-    .attr('r', 3).attr('fill', '#1a1a1a');
+    .attr('r', 2).attr('fill', '#1a1a1a');
 
-  // Larger invisible hit targets on the dots — a 3px dot is too small to
+  // Larger invisible hit targets on the dots — a 2px dot is too small to
   // hover reliably, so the tooltip trigger is an 8px transparent circle
   // centered on the same point.
   g.selectAll('.wdot-hit').data(weeklyData).join('circle')
@@ -352,15 +317,6 @@ function draw() {
     .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px')
     .attr('font-weight', '700').attr('fill', '#1a1a1a')
     .text(last.cumulative_cases);
-
-  // Legend — aligned to x=0 (the SVG's left edge), matching the head/chatter
-  // text above it, rather than the plot area's margin.left inset.
-  const legend = svg.append('g').attr('transform', 'translate(0, 6)');
-  legend.append('rect').attr('width', 10).attr('height', 10).attr('y', 1).attr('fill', '#a93226').attr('opacity', 0.75);
-  legend.append('text').attr('x', 14).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Weekly new cases');
-  legend.append('line').attr('x1', 120).attr('x2', 132).attr('y1', 6).attr('y2', 6).attr('stroke', '#1a1a1a').attr('stroke-width', 2);
-  legend.append('circle').attr('cx', 126).attr('cy', 6).attr('r', 3).attr('fill', '#1a1a1a');
-  legend.append('text').attr('x', 136).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Cumulative cases');
 }
 
 // Tells the parent frame our true content height, in case it's set up
