@@ -411,6 +411,181 @@ decode_dsr_rows <- function(dm1) {
   tibble(county = county, new_cases = cases)
 }
 
+# Rewrite every SourceRef in a PBIR expression tree to point at a query-level
+# `From` alias. PBIR projections reference tables as {Entity: "..."}, while
+# filters reference their own local aliases ({Source: "p"}) declared in that
+# filter's own From — `local_aliases` maps those local names to entities.
+pbir_rewrite_source_refs <- function(node, entity_alias, local_aliases = list()) {
+  if (!is.list(node)) return(node)
+  if (!is.null(names(node)) && "SourceRef" %in% names(node)) {
+    ref <- node$SourceRef
+    entity <- if (!is.null(ref$Entity)) ref$Entity else local_aliases[[ref$Source]]
+    node$SourceRef <- list(Source = entity_alias[[entity]])
+  }
+  for (i in seq_along(node)) {
+    if (is.list(node[[i]])) node[[i]] <- pbir_rewrite_source_refs(node[[i]], entity_alias, local_aliases)
+  }
+  node
+}
+
+# Build a legacy SemanticQuery (the shape the querydata API expects, and what
+# the legacy layout shipped pre-built in each visual's `query`) from a PBIR
+# visual's queryState projections plus its filterConfig's filter clauses.
+# Uses a single flat grouping, so results come back under DM0 (see
+# query_pbi_county_table()).
+pbir_build_query <- function(visual, filters) {
+  entity_alias <- list()
+  add_entity <- function(entity) {
+    if (is.null(entity_alias[[entity]])) {
+      entity_alias[[entity]] <<- paste0("t", length(entity_alias))
+    }
+  }
+  collect_entities <- function(node) {
+    if (!is.list(node)) return(invisible())
+    if (!is.null(node$SourceRef$Entity)) add_entity(node$SourceRef$Entity)
+    for (child in node) collect_entities(child)
+  }
+
+  projections   <- list()
+  show_no_data  <- integer(0)
+  for (role in visual$query$queryState) {
+    for (p in role$projections) {
+      collect_entities(p$field)
+      projections[[length(projections) + 1]] <- p
+      if (isTRUE(role$showAll)) show_no_data <- c(show_no_data, length(projections) - 1L)
+    }
+  }
+  if (length(projections) == 0) return(NULL)
+
+  where <- list()
+  for (f in filters) {
+    if (is.null(f$filter$Where)) next
+    # Subquery sources (e.g. a TopN filter on the Community Transmission
+    # tab's date card) have no Entity — none of the visuals this scraper
+    # queries use one, so drop those filters instead of translating them.
+    has_subquery <- any(vapply(f$filter$From, function(src) is.null(src$Entity), logical(1)))
+    if (has_subquery) next
+    local_aliases <- list()
+    for (src in f$filter$From) {
+      local_aliases[[src$Name]] <- src$Entity
+      add_entity(src$Entity)
+    }
+    for (w in f$filter$Where) {
+      where[[length(where) + 1]] <- pbir_rewrite_source_refs(w, entity_alias, local_aliases)
+    }
+  }
+
+  select <- lapply(projections, function(p) {
+    s <- pbir_rewrite_source_refs(p$field, entity_alias)
+    s$Name <- p$queryRef
+    s
+  })
+  from <- lapply(names(entity_alias), function(e) list(Name = entity_alias[[e]], Entity = e, Type = 0L))
+
+  grouping <- list(Projections = as.list(seq_along(select) - 1L))
+  if (length(show_no_data) > 0) grouping$ShowItemsWithNoData <- as.list(show_no_data)
+
+  query <- list(Version = 2L, From = from, Select = select)
+  if (length(where) > 0) query$Where <- where
+
+  list(
+    prototype_query = query,
+    query = list(Commands = list(list(SemanticQueryDataShapeCommand = list(
+      Query   = query,
+      Binding = list(
+        Primary       = list(Groupings = list(grouping)),
+        DataReduction = list(DataVolume = 4, Primary = list(Window = list(Count = 1000))),
+        Version       = 1
+      ),
+      ExecutionMetricsKind = 1
+    ))))
+  )
+}
+
+# As of 2026-09-23 the DOH report is published in Power BI's PBIR format:
+# `sections[].visualContainers[]` only carry id/position/objectName, and the
+# real definitions (visual type, fields, filters, bookmarks) live in
+# `explorationContent$explorationDocument`, a JSON string with a different
+# schema. Rather than teach every finder both formats, rebuild the legacy
+# fields they read — each container's `config`/`query`/`filters` and the
+# exploration's `config$bookmarks` — from the PBIR document. A no-op on a
+# legacy-format report.
+normalize_pbir_exploration <- function(exploration) {
+  doc_json <- exploration$explorationContent$explorationDocument
+  if (is.null(doc_json)) return(exploration)
+  doc <- fromJSON(doc_json, simplifyVector = FALSE)
+
+  # Each page also has a "Select a Time Period" slicer (TimeFrame, defaulting
+  # to 'Year to date') that cross-filters the other visuals on that page.
+  # PAmeasles2026_Public holds a row set per time frame, so without the
+  # slicer's selection every statewide total comes back summed across all of
+  # them (observed 2026-09-23: 1,670 cases instead of 835). The legacy
+  # layout's pre-built `query` baked this in; PBIR doesn't, so apply each
+  # page's slicer selections to its other visuals ourselves.
+  pbir_visuals  <- list()
+  page_slicers  <- list()
+  page_no_filter <- list()
+  for (page in doc$pages$pages) {
+    page_name <- page$content$name
+    page_slicers[[page_name]] <- list()
+    for (vc in page$visualContainers) {
+      pbir_visuals[[vc$content$name]] <- vc$content
+      v <- vc$content$visual
+      if (!isTRUE(str_detect(str_to_lower(v$visualType %||% ""), "slicer"))) next
+      for (g in v$objects$general) {
+        sel <- g$properties$filter$filter
+        if (is.null(sel)) next
+        page_slicers[[page_name]][[length(page_slicers[[page_name]]) + 1]] <- list(
+          slicer = vc$content$name, filter = list(filter = sel)
+        )
+      }
+    }
+    page_no_filter[[page_name]] <- Filter(
+      function(i) identical(i$type, "NoFilter"), page$content$visualInteractions
+    )
+  }
+
+  for (si in seq_along(exploration$sections)) {
+    page_name  <- exploration$sections[[si]]$objectName
+    containers <- exploration$sections[[si]]$visualContainers
+    for (vi in seq_along(containers)) {
+      vc <- containers[[vi]]
+      if (!is.null(vc$config)) next
+      pv <- pbir_visuals[[vc$objectName]]
+      if (is.null(pv$visual)) next
+
+      filters <- pv$filterConfig$filters
+      slicer_filters <- list()
+      for (s in page_slicers[[page_name]]) {
+        if (identical(s$slicer, pv$name)) next
+        blocked <- any(vapply(page_no_filter[[page_name]], function(i) {
+          identical(i$source, s$slicer) && identical(i$target, pv$name)
+        }, logical(1)))
+        if (!blocked) slicer_filters[[length(slicer_filters) + 1]] <- s$filter
+      }
+      built <- pbir_build_query(pv$visual, c(filters, slicer_filters))
+
+      vc$config <- toJSON(list(
+        name = pv$name,
+        singleVisual = list(visualType = pv$visual$visualType, prototypeQuery = built$prototype_query)
+      ), auto_unbox = TRUE, digits = NA)
+      vc$query <- if (is.null(built)) "" else toJSON(built$query, auto_unbox = TRUE, digits = NA)
+      vc$filters <- toJSON(lapply(filters, function(f) {
+        list(name = f$name, expression = f$field, filter = f$filter)
+      }), auto_unbox = TRUE, digits = NA)
+      containers[[vi]] <- vc
+    }
+    exploration$sections[[si]]$visualContainers <- containers
+  }
+
+  if (is.null(exploration$config)) {
+    bookmarks <- lapply(doc$bookmarks$bookmarks, function(b) b$content)
+    exploration$config <- toJSON(list(bookmarks = bookmarks), auto_unbox = TRUE, digits = NA)
+  }
+
+  exploration
+}
+
 # Build once per scrape: everything needed to run further queries against
 # this report (cluster host, resource key, dataset/model ids, full layout).
 build_pbi_context <- function(html) {
@@ -429,7 +604,7 @@ build_pbi_context <- function(html) {
     model_id     = exploration_resp$models[[1]]$id,
     dataset_id   = exploration_resp$models[[1]]$dbName,
     report_id    = exploration_resp$exploration$reportId,
-    exploration  = exploration_resp$exploration
+    exploration  = normalize_pbir_exploration(exploration_resp$exploration)
   )
 }
 
