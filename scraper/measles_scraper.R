@@ -531,7 +531,7 @@ normalize_pbir_exploration <- function(exploration) {
     for (vc in page$visualContainers) {
       pbir_visuals[[vc$content$name]] <- vc$content
       v <- vc$content$visual
-      if (!isTRUE(str_detect(str_to_lower(v$visualType %||% ""), "slicer"))) next
+      if (is.null(v$visualType) || !str_detect(str_to_lower(v$visualType), "slicer")) next
       for (g in v$objects$general) {
         sel <- g$properties$filter$filter
         if (is.null(sel)) next
