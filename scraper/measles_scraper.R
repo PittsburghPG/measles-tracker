@@ -28,12 +28,11 @@ suppressPackageStartupMessages({
 # ---------------------------------------------------------------------------
 
 SOURCE_URL          <- "https://www.pa.gov/agencies/health/diseases-conditions/infectious-disease/measles"
-DEFAULT_TSV         <- "data/cases_by_county.tsv"
+DEFAULT_TSV         <- "data/daily_cases_by_county.tsv"
 WEEKLY_TSV          <- "data/summary_weekly.tsv"
-AGE_GROUP_TSV       <- "data/cases_by_age_group.tsv"
-DAILY_HOSP_TSV      <- "data/hospitalization_by_age_group.tsv"
+AGE_GROUP_TSV       <- "data/daily_cases_by_age_group.tsv"
+DAILY_HOSP_TSV      <- "data/daily_hospitalization_by_age_group.tsv"
 SUMMARY_TSV         <- "data/summary_daily.tsv"
-SUMMARY_COUNTY_TSV  <- "data/summary_county.tsv"
 TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
@@ -889,13 +888,13 @@ save_tsv_data <- function(df, path) {
 
 # summary_weekly.tsv is the full, authoritative weekly record — one row per
 # week going back to the start of the outbreak, with `new_cases` synced from
-# cases_by_county.tsv's scrape-date rollup every run, EXCEPT for weeks listed
+# daily_cases_by_county.tsv's scrape-date rollup every run, EXCEPT for weeks listed
 # in ADJUSTED_WEEKS (e.g. a lump-sum catch-up delta after a scraper outage
 # misattributes cases to the wrong week) — those are hand-corrected and
 # never auto-overwritten. `cumulative_cases` is fully derived (a running sum
 # of `new_cases`), so it's recomputed from scratch on every save rather than
 # tracked as independent state — see save_weekly_tsv(). See README.
-# Kept separate from cases_by_county.tsv so that file stays an honest record
+# Kept separate from daily_cases_by_county.tsv so that file stays an honest record
 # of actual scrape dates. See README.
 WEEKLY_TSV_COLS <- c("week_start", "new_cases", "cumulative_cases")
 
@@ -929,9 +928,9 @@ save_weekly_tsv <- function(df, path) {
   message("Saved ", nrow(df), " week(s) to '", path, "'")
 }
 
-# Refresh `new_cases` for every week from cases_by_county.tsv's scrape-date
+# Refresh `new_cases` for every week from daily_cases_by_county.tsv's scrape-date
 # rollup, except weeks in ADJUSTED_WEEKS (hand-corrected, left untouched).
-# Adds a row for any new week that's shown up in cases_by_county.tsv but isn't
+# Adds a row for any new week that's shown up in daily_cases_by_county.tsv but isn't
 # in the weekly file yet.
 sync_weekly_case_counts <- function(weekly_df, daily_df) {
   computed <- daily_df |>
@@ -958,13 +957,13 @@ sync_weekly_case_counts <- function(weekly_df, daily_df) {
   weekly_df |> arrange(week_start)
 }
 
-# hospitalization_by_age_group.tsv: statewide hospitalizations per day, one
+# daily_hospitalization_by_age_group.tsv: statewide hospitalizations per day, one
 # row per category (total / children [under 18] / adult [18+]) — mirroring
 # HOSP_CATEGORY_PROPERTIES above. PDOH's dashboard only exposes a running YTD
 # cumulative total per category (not broken out by day or county), so each
 # scrape run records that total as `cumulative_hospitalizations` and derives
 # `new_hospitalizations` by diffing it against the category's most recent
-# prior day's cumulative total already on record. Unlike cases_by_county.tsv,
+# prior day's cumulative total already on record. Unlike daily_cases_by_county.tsv,
 # this can't be broken out by county.
 DAILY_HOSP_TSV_COLS  <- c("date", "category", "new_hospitalizations", "cumulative_hospitalizations")
 HOSP_CATEGORY_ORDER  <- c("total", "children", "adult")
@@ -1029,17 +1028,17 @@ update_daily_hospitalizations <- function(hosp_df, today, snapshot) {
 }
 
 # summary_daily.tsv: one row per day PDOH actually reported a change,
-# statewide totals only — a quick-scan complement to cases_by_county.tsv
-# (per-county) and hospitalization_by_age_group.tsv (per-category), which
+# statewide totals only — a quick-scan complement to daily_cases_by_county.tsv
+# (per-county) and daily_hospitalization_by_age_group.tsv (per-category), which
 # stay in their long, disaggregated form. A day where neither case count nor
 # hospitalization count moved isn't a real data point — it just means PDOH
 # hadn't published an update yet — so no row is written for it, mirroring
-# cases_by_county.tsv and cases_by_age_group.tsv's "only write a row when
+# daily_cases_by_county.tsv and daily_cases_by_age_group.tsv's "only write a row when
 # something changed" convention. `cumulative_cases` is recomputed from
 # scratch each run as the sum of every `new_cases` ever recorded in
-# cases_by_county.tsv (same "recompute rather than track" approach as
+# daily_cases_by_county.tsv (same "recompute rather than track" approach as
 # summary_weekly.tsv's cumulative_cases), so it can't drift. Hospitalization
-# columns stay blank until hospitalization_by_age_group.tsv's
+# columns stay blank until daily_hospitalization_by_age_group.tsv's
 # "total" category starts recording (Aug 28, 2026); once it has, a row still
 # written because cases changed (but whose hospitalization fetch failed that
 # run) carries its cumulative forward with `new_hospitalizations` of 0, since
@@ -1072,27 +1071,9 @@ save_summary_tsv <- function(df, path) {
   message("Saved ", nrow(df), " row(s) to '", path, "'")
 }
 
-# summary_county.tsv: one row per county, showing just its cumulative case
-# total for the year — a flat lookup table complement to
-# cases_by_county.tsv's full per-date history, for anyone who just wants
-# "how many cases has each county had" without summing new_cases rows by
-# hand. Rewritten in full from cases_by_county.tsv every run (same
-# "recompute rather than track" approach as the other summary files), so it
-# can't drift, and only lists counties that have recorded at least one case.
-SUMMARY_COUNTY_COLS <- c("county", "cumulative_cases")
-
-save_summary_county_tsv <- function(case_daily_df, path) {
-  totals <- case_daily_df |>
-    group_by(county) |>
-    summarise(cumulative_cases = sum(new_cases, na.rm = TRUE), .groups = "drop") |>
-    arrange(county)
-  write_tsv(totals[, SUMMARY_COUNTY_COLS], path, na = "")
-  message("Saved ", nrow(totals), " county total(s) to '", path, "'")
-}
-
 # Upsert today's row into summary_daily.tsv, or leave it unchanged if
 # neither case count nor hospitalization count actually moved today.
-# `case_daily_df` is cases_by_county.tsv's full updated state; `today`'s new
+# `case_daily_df` is daily_cases_by_county.tsv's full updated state; `today`'s new
 # case total is summed directly from it (every county's rows dated today),
 # not passed in as this run's own diff — the scraper can run more than once
 # on the same calendar day (e.g. a manual run followed by the scheduled
@@ -1100,7 +1081,7 @@ save_summary_county_tsv <- function(case_daily_df, path) {
 # county.tsv already holds the day's real total from the earlier run.
 # Deriving it fresh from the full file each time, like `cumulative_cases`
 # below, makes this idempotent no matter how many times it runs today.
-# `hosp_df` is hospitalization_by_age_group.tsv's updated state, from which
+# `hosp_df` is daily_hospitalization_by_age_group.tsv's updated state, from which
 # today's "total" category row (if any) supplies the hospitalization
 # figures.
 update_daily_summary <- function(summary_df, today, case_daily_df, hosp_df) {
@@ -1138,8 +1119,8 @@ update_daily_summary <- function(summary_df, today, case_daily_df, hosp_df) {
   summary_df |> filter(date != today) |> bind_rows(today_row)
 }
 
-# cases_by_age_group.tsv: one row per day a given age group's statewide
-# cumulative case count went up, mirroring cases_by_county.tsv's "only write a
+# daily_cases_by_age_group.tsv: one row per day a given age group's statewide
+# cumulative case count went up, mirroring daily_cases_by_county.tsv's "only write a
 # row when the count changes" convention. `cumulative_cases` is the group's
 # statewide YTD total straight off the dashboard for that day; `new_cases` is
 # blank on a group's very first tracked row (there's no prior baseline to
@@ -1425,11 +1406,7 @@ tryCatch({
     sync_weekly_case_counts(updated)
   save_weekly_tsv(weekly_tsv, WEEKLY_TSV)
 
-  # summary_county.tsv is rewritten in full every run regardless of whether
-  # new_rows is NULL, same as summary_weekly.tsv above.
-  save_summary_county_tsv(updated, SUMMARY_COUNTY_TSV)
-
-  # hospitalization_by_age_group.tsv update is non-fatal — if
+  # daily_hospitalization_by_age_group.tsv update is non-fatal — if
   # it fails, the case-count sync above still gets saved, just without a
   # hospitalization update this run.
   hosp_tsv <- load_daily_hosp_tsv(DAILY_HOSP_TSV)
@@ -1442,8 +1419,8 @@ tryCatch({
   })
 
   # summary_daily.tsv: statewide quick-scan totals, kept in sync with
-  # whatever just got saved to cases_by_county.tsv and
-  # hospitalization_by_age_group.tsv above (including a failed
+  # whatever just got saved to daily_cases_by_county.tsv and
+  # daily_hospitalization_by_age_group.tsv above (including a failed
   # hospitalization update — hosp_tsv still holds its last-saved state then).
   summary_tsv <- load_summary_tsv(SUMMARY_TSV) |>
     update_daily_summary(today, updated, hosp_tsv)
