@@ -7,7 +7,7 @@ This project checks the Pennsylvania Department of Health's (PDOH) website every
 A scheduled job runs every day at 5:05pm ET:
 
 1. The scraper checks PDOH's measles page and compares the numbers it finds there to what's already saved in `daily_cases_by_county.tsv`
-2. If a county's case count went up, it adds a new row to `daily_cases_by_county.tsv` for that increase, recording that county's running case total for the year (across both outbreaks) as `cumulative_cases`
+2. If a county's case count went up, it adds a new row to `daily_cases_by_county.tsv` for that increase, recording that county's running case total for the year as `cumulative_cases`
 3. It then updates `summary_weekly.tsv`: for each week, it adds up that week's new cases from `daily_cases_by_county.tsv`, skipping any week we've corrected by hand, and recomputes `cumulative_cases` as a running total across all weeks
 4. It also updates `daily_cases_by_age_group.tsv`: PDOH's dashboard only exposes a statewide year-to-date cumulative case count broken out by age group (not by day), so each run compares each age group's cumulative total (`cumulative_cases`) to what's already recorded and, for any group that went up, adds a row for the increase (`new_cases`)
 5. It also updates `daily_hospitalization_by_age_group.tsv`: PDOH's Hospitalization tab exposes a statewide running total broken out into three cards — total, under 18 ("children"), and 18+ ("adult") — but not by day or county, so each run adds one row per category, recording that category's total as `cumulative_hospitalizations` and working out `new_hospitalizations` by diffing it against that category's most recent prior day's cumulative total on record
