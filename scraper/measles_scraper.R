@@ -33,7 +33,11 @@ WEEKLY_TSV          <- "data/summary_weekly.tsv"
 AGE_GROUP_TSV       <- "data/daily_cases_by_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/daily_hospitalization_by_age_group.tsv"
 SUMMARY_TSV         <- "data/summary_daily.tsv"
-TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
+TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "source")
+# Date of each outbreak's first recorded case. The outbreaks don't overlap,
+# so a row's outbreak is whichever one had most recently started as of its
+# date — see outbreak_for_date().
+OUTBREAK_START_DATES <- as.Date(c("2026-01-30", "2026-04-23"))
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
 MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
@@ -859,21 +863,17 @@ load_tsv_data <- function(path) {
     message("TSV not found at '", path, "' — will create a new one on first write")
     return(
       tibble(
-        date                      = character(),
-        county                    = character(),
-        new_cases                 = integer(),
-        cumulative_cases          = integer(),
-        cumulative_outbreak_cases = integer(),
-        source                    = character(),
-        outbreak                  = integer()
+        date             = character(),
+        county           = character(),
+        new_cases        = integer(),
+        cumulative_cases = integer(),
+        source           = character()
       )
     )
   }
   df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
-  df$new_cases                 <- as.integer(df$new_cases)
-  df$outbreak                  <- as.integer(df$outbreak)
-  df$cumulative_cases          <- as.integer(df$cumulative_cases)
-  df$cumulative_outbreak_cases <- as.integer(df$cumulative_outbreak_cases)
+  df$new_cases        <- as.integer(df$new_cases)
+  df$cumulative_cases <- as.integer(df$cumulative_cases)
   message("Loaded ", nrow(df), " existing rows from '", path, "'")
   df
 }
@@ -1159,15 +1159,20 @@ save_age_group_tsv <- function(df, path) {
 
 # `snapshot$new_cases` (despite the name, inherited from the PBI table's own
 # column) is actually PDOH's cumulative case count for that county+outbreak,
-# not a "new today" figure — see parse_cases(). Below, it's used both to
-# detect each outbreak's delta and, directly, as `cumulative_outbreak_cases`
-# (known_n + delta always equals it exactly, so no separate tracking needed).
+# not a "new today" figure — see parse_cases(). Below, it's used to detect
+# each outbreak's delta against the rows already recorded for that outbreak.
 # `cumulative_cases`, in contrast, tracks each county's running total across
 # the whole year (both outbreaks combined), so it's accumulated locally
 # instead — see county_year_totals_from_tsv().
+
+# Which outbreak (1, 2, ...) a date falls in, per OUTBREAK_START_DATES.
+outbreak_for_date <- function(date) {
+  findInterval(as.Date(date), OUTBREAK_START_DATES)
+}
+
 county_totals_from_tsv <- function(existing, outbreak_num) {
   existing |>
-    filter(outbreak == outbreak_num) |>
+    filter(outbreak_for_date(date) == outbreak_num) |>
     group_by(county) |>
     summarise(known_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
 }
@@ -1187,6 +1192,7 @@ build_new_rows <- function(snapshot, existing) {
 
   year_totals <- county_year_totals_from_tsv(existing)
   year_total_lookup <- setNames(as.list(year_totals$year_total), year_totals$county)
+  current_outbreak  <- outbreak_for_date(today)
 
   for (i in seq_len(nrow(snapshot))) {
     ob     <- snapshot$outbreak[i]
@@ -1199,7 +1205,15 @@ build_new_rows <- function(snapshot, existing) {
 
     delta <- snap_n - known_n
 
-    if (delta > 0) {
+    if (delta > 0 && ob != current_outbreak) {
+      # A row dated today would be counted toward the current outbreak, not
+      # this one, so this delta would be re-added on every run. Flag it for a
+      # hand fix instead.
+      warning(sprintf(
+        "ANOMALY: +%d case(s) in %s County reported for past outbreak %d — skipping; add by hand with a date inside that outbreak",
+        delta, county, ob
+      ))
+    } else if (delta > 0) {
       message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
 
       # Accumulate locally (rather than re-reading `existing`) so that if the
@@ -1210,13 +1224,11 @@ build_new_rows <- function(snapshot, existing) {
       year_total_lookup[[county]] <- year_total
 
       new_rows[[length(new_rows) + 1]] <- tibble(
-        date                      = today,
-        county                    = county,
-        new_cases                 = delta,
-        cumulative_cases          = year_total,
-        cumulative_outbreak_cases = snap_n,
-        source                    = "Scrape of PDOH measles webpage",
-        outbreak                  = ob
+        date             = today,
+        county           = county,
+        new_cases        = delta,
+        cumulative_cases = year_total,
+        source           = "Scrape of PDOH measles webpage"
       )
     } else if (delta < 0) {
       warning(sprintf(
@@ -1316,6 +1328,7 @@ inject_embed_data <- function(path, js_lines) {
 # Per-county ob1/ob2/total, mirroring the map's caseData shape.
 compute_case_data <- function(daily_df) {
   daily_df |>
+    mutate(outbreak = outbreak_for_date(date)) |>
     group_by(county, outbreak) |>
     summarise(total_cases = sum(new_cases, na.rm = TRUE), .groups = "drop") |>
     group_by(county) |>
