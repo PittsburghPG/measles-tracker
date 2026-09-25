@@ -17,14 +17,15 @@ You can also run it manually: **Actions → Scrape → Run workflow**
 
 ## Visualizations
 
-The embeds in `visualizations/` are updated by a separate script, `visualizations/update_visualizations.R`, which reads the files in `data/` and rewrites each embed's inlined data. It runs as its own workflow, independent of the scraper: **Actions → Update visualizations → Run workflow**
+The embeds in `visualizations/` — a county map (`map-embed.html`) and a weekly trend chart (`weekly-trend-embed.html`) — are updated by a separate script, `scraper/update_visualizations.R`, which reads the files in `data/` and rewrites each embed's inlined data. Their headlines and chatter are TK placeholders, to be written for each story. It runs as its own workflow, independent of the scraper: **Actions → Update visualizations → Run workflow**
 
 ## Repo structure
 
 ```
 measles-tracker/
 ├── scraper/
-│   └── measles_scraper.R     
+│   ├── measles_scraper.R
+│   └── update_visualizations.R
 ├── data/
 │   ├── daily_cases_by_county.tsv
 │   ├── daily_cases_by_age_group.tsv
@@ -32,9 +33,7 @@ measles-tracker/
 │   ├── summary_daily.tsv
 │   └── summary_weekly.tsv
 ├── visualizations/
-│   ├── update_visualizations.R
-│   ├── cases-by-year-embed.html
-│   ├── map-combined-embed.html
+│   ├── map-embed.html
 │   └── weekly-trend-embed.html
 └── .github/
     └── workflows/

@@ -13,7 +13,7 @@
 # reading whatever the scraper last committed.
 #
 # Usage:
-#   Rscript visualizations/update_visualizations.R
+#   Rscript scraper/update_visualizations.R
 #
 # Requirements (install once):
 #   install.packages(c("dplyr", "readr", "stringr"))
@@ -27,8 +27,7 @@ suppressPackageStartupMessages({
 
 COUNTY_TSV           <- "data/daily_cases_by_county.tsv"
 WEEKLY_TSV           <- "data/summary_weekly.tsv"
-BAR_EMBED_HTML       <- "visualizations/cases-by-year-embed.html"
-MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
+MAP_EMBED_HTML       <- "visualizations/map-embed.html"
 WEEKLY_EMBED_HTML    <- "visualizations/weekly-trend-embed.html"
 
 # Replace the JS between the "/* SCRAPER-DATA-START */" and
@@ -56,11 +55,7 @@ compute_case_data <- function(daily_df) {
     arrange(county)
 }
 
-update_bar_embed <- function(total_cases, path) {
-  inject_embed_data(path, sprintf("  const totalCases = %d;", total_cases))
-}
-
-update_total_map_embed <- function(case_data, total_cases, last_updated, path) {
+update_map_embed <- function(case_data, total_cases, last_updated, path) {
   entries <- sprintf('  "%s": %d', case_data$county, case_data$total)
   entries[-length(entries)] <- paste0(entries[-length(entries)], ",")
 
@@ -99,11 +94,8 @@ total_cases  <- sum(case_data$total)
 last_updated <- format(Sys.Date(), "%b %e, %Y") |> trimws()
 
 # Skip any embed whose file isn't present, rather than failing the run.
-if (file.exists(BAR_EMBED_HTML)) {
-  update_bar_embed(total_cases, BAR_EMBED_HTML)
-}
-if (file.exists(MAP_TOTAL_EMBED_HTML)) {
-  update_total_map_embed(case_data, total_cases, last_updated, MAP_TOTAL_EMBED_HTML)
+if (file.exists(MAP_EMBED_HTML)) {
+  update_map_embed(case_data, total_cases, last_updated, MAP_EMBED_HTML)
 }
 if (file.exists(WEEKLY_EMBED_HTML)) {
   update_weekly_embed(weekly, WEEKLY_EMBED_HTML)

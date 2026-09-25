@@ -15,7 +15,7 @@
  * Font: Roboto (fallback Arial/sans-serif). Body/annotation/label text
  * capped at two sizes — 14px primary (near-black), 12px secondary (gray).
  * Regular weight for body text; bold reserved for titles and emphasis.
- * Sentence case throughout. See measles_scraper.R comments for source.
+ * Sentence case throughout.
  */
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -176,11 +176,9 @@ const TRANSMISSION_COUNTIES = [
   "Jefferson", "Lancaster", "Mifflin", "Snyder", "York"
 ];
 
-const countyCount = Object.keys(caseData).length;
-document.getElementById('dw-title').textContent =
-  `Measles infections have been reported in half the state`;
-document.getElementById('dw-description').innerHTML =
-  `Measles cases have been reported in ${countyCount} counties this year. State health officials have identified at least ${TRANSMISSION_COUNTIES.length} counties where measles is <span class="dw-highlight">actively circulating</span> and the risk of being infected is highest.`;
+document.getElementById('dw-title').textContent = `TK`;
+document.getElementById('dw-description').textContent =
+  `Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`;
 document.getElementById('dw-asof').textContent = lastUpdated;
 
 const paFips = {

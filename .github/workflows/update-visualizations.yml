@@ -21,7 +21,7 @@ jobs:
           Rscript -e "install.packages(c('dplyr','readr','stringr'), repos='https://cloud.r-project.org')"
 
       - name: Update embeds
-        run: Rscript visualizations/update_visualizations.R
+        run: Rscript scraper/update_visualizations.R
 
       - name: Commit updated embeds
         run: |
