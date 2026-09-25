@@ -15,6 +15,10 @@ A scheduled job runs every day at 5:05pm ET:
 
 You can also run it manually: **Actions → Scrape → Run workflow**
 
+## Visualizations
+
+The embeds in `visualizations/` are updated by a separate script, `visualizations/update_visualizations.R`, which reads the files in `data/` and rewrites each embed's inlined data. It runs as its own workflow, independent of the scraper: **Actions → Update visualizations → Run workflow**
+
 ## Repo structure
 
 ```
@@ -27,9 +31,15 @@ measles-tracker/
 │   ├── daily_hospitalization_by_age_group.tsv
 │   ├── summary_daily.tsv
 │   └── summary_weekly.tsv
+├── visualizations/
+│   ├── update_visualizations.R
+│   ├── cases-by-year-embed.html
+│   ├── map-combined-embed.html
+│   └── weekly-trend-embed.html
 └── .github/
     └── workflows/
-        └── scrape.yml
+        ├── scrape.yml
+        └── update-visualizations.yml
 ```
 
 ## Known limitations
