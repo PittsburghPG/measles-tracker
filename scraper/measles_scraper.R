@@ -33,11 +33,7 @@ WEEKLY_TSV          <- "data/summary_weekly.tsv"
 AGE_GROUP_TSV       <- "data/daily_cases_by_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/daily_hospitalization_by_age_group.tsv"
 SUMMARY_TSV         <- "data/summary_daily.tsv"
-TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
-BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
-MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
-MAP_TOTAL_EMBED_HTML <- "visualizations/map-combined-embed.html"
-WEEKLY_EMBED_HTML   <- "visualizations/weekly-trend-embed.html"
+TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "source")
 
 UA_STRING <- paste0(
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
@@ -97,18 +93,9 @@ fetch_html <- function(url) {
 #   3. Hit `<cluster>/public/reports/<resourceKey>/modelsAndExploration` to
 #      get the report layout (sections, visuals, and their DAX-ish queries).
 #   4. Locate the "county x case count" table visuals — identified by a
-#      `Where` filter on a `map` field — and run their queries against
-#      `<cluster>/public/reports/querydata`.
-#   5. Figure out which `map` value is which outbreak by checking which
-#      table is made visible by the report's "January" / "April" bookmarks,
-#      since the underlying field codes (e.g. "ob1"/"ob2") aren't
-#      self-describing and aren't guaranteed to stay assigned the same way.
+#      `Where` filter on a `map` field — and run the year-to-date one
+#      (`map` = "ytd") against `<cluster>/public/reports/querydata`.
 # ---------------------------------------------------------------------------
-
-PBI_HEADING_MAP <- list(
-  "april"   = 2L,
-  "january" = 1L
-)
 
 extract_pbi_embed_url <- function(html) {
   page   <- read_html(html)
@@ -335,49 +322,6 @@ find_county_map_visuals <- function(exploration) {
   }
 
   vc_map
-}
-
-# The `map` field's values (e.g. "ob1"/"ob2") aren't self-describing, so match
-# each one to an outbreak number via the report's own "January.../April..."
-# bookmarks, which reveal which table each bookmark makes visible.
-map_bookmarks_to_outbreaks <- function(exploration, vc_map) {
-  cfg <- fromJSON(exploration$config, simplifyVector = FALSE)
-  outbreak_for_map_value <- list()
-
-  for (bm in cfg$bookmarks) {
-    name_lower <- str_to_lower(bm$displayName)
-    ob_num <- NA_integer_
-    for (fragment in names(PBI_HEADING_MAP)) {
-      if (str_detect(name_lower, fixed(fragment))) {
-        ob_num <- PBI_HEADING_MAP[[fragment]]
-        break
-      }
-    }
-    if (is.na(ob_num)) next
-
-    for (sec_state in bm$explorationState$sections) {
-      for (vc_id in names(sec_state$visualContainers)) {
-        sv <- sec_state$visualContainers[[vc_id]]$singleVisual
-        if (is.null(sv) || !identical(sv$visualType, "tableEx")) next
-        if (identical(sv$display$mode, "hidden")) next
-
-        for (map_value in names(vc_map)) {
-          if (identical(vc_map[[map_value]]$name, vc_id)) {
-            outbreak_for_map_value[[map_value]] <- ob_num
-          }
-        }
-      }
-    }
-  }
-
-  if (length(outbreak_for_map_value) == 0) {
-    stop(
-      "Could not match any Power BI 'map' field value to an outbreak via ",
-      "bookmarks — the report's bookmarks may have changed."
-    )
-  }
-
-  outbreak_for_map_value
 }
 
 # Decode a Power BI DSR row set, expanding the "R" repeat-from-previous-row
@@ -654,32 +598,24 @@ query_pbi_county_table <- function(ctx, vc) {
   decode_dsr_rows(dm1)
 }
 
+# The report's "ytd" county table holds each county's year-to-date case
+# total (PDOH's own column is named `new_cases`, but it's cumulative), so it
+# comes back as `cumulative_cases` here.
+PBI_YTD_MAP_VALUE <- "ytd"
+
 parse_cases <- function(ctx) {
-  today <- as.character(Sys.Date())
-
-  vc_map               <- find_county_map_visuals(ctx$exploration)
-  outbreak_for_map_val <- map_bookmarks_to_outbreaks(ctx$exploration, vc_map)
-
-  rows <- list()
-  for (map_value in names(outbreak_for_map_val)) {
-    ob_num <- outbreak_for_map_val[[map_value]]
-    counts <- query_pbi_county_table(ctx, vc_map[[map_value]])
-    message("Outbreak ", ob_num, " (map='", map_value, "'): ", sum(counts$new_cases), " total cases")
-
-    rows[[length(rows) + 1]] <- counts |>
-      mutate(date = today, source = SOURCE_URL, outbreak = ob_num) |>
-      select(date, new_cases, county, source, outbreak)
-  }
-
-  if (length(rows) == 0) {
+  vc_map <- find_county_map_visuals(ctx$exploration)
+  vc     <- vc_map[[PBI_YTD_MAP_VALUE]]
+  if (is.null(vc)) {
     stop(
-      "No case data extracted from the Power BI dashboard. ",
+      "No year-to-date county table (map='", PBI_YTD_MAP_VALUE, "') found in the Power BI dashboard. ",
       "The report structure may have changed — check the embed or update parse_cases()."
     )
   }
 
-  result <- bind_rows(rows)
-  message("Parsed ", nrow(result), " county totals from the Power BI dashboard")
+  result <- query_pbi_county_table(ctx, vc) |>
+    select(county, cumulative_cases = new_cases)
+  message("Parsed ", nrow(result), " county totals (", sum(result$cumulative_cases), " cases) from the Power BI dashboard")
   result
 }
 
@@ -859,21 +795,17 @@ load_tsv_data <- function(path) {
     message("TSV not found at '", path, "' — will create a new one on first write")
     return(
       tibble(
-        date                      = character(),
-        county                    = character(),
-        new_cases                 = integer(),
-        cumulative_cases          = integer(),
-        cumulative_outbreak_cases = integer(),
-        source                    = character(),
-        outbreak                  = integer()
+        date             = character(),
+        county           = character(),
+        new_cases        = integer(),
+        cumulative_cases = integer(),
+        source           = character()
       )
     )
   }
   df <- read_tsv(path, col_types = cols(.default = "c"), show_col_types = FALSE)
-  df$new_cases                 <- as.integer(df$new_cases)
-  df$outbreak                  <- as.integer(df$outbreak)
-  df$cumulative_cases          <- as.integer(df$cumulative_cases)
-  df$cumulative_outbreak_cases <- as.integer(df$cumulative_outbreak_cases)
+  df$new_cases        <- as.integer(df$new_cases)
+  df$cumulative_cases <- as.integer(df$cumulative_cases)
   message("Loaded ", nrow(df), " existing rows from '", path, "'")
   df
 }
@@ -1157,79 +1089,45 @@ save_age_group_tsv <- function(df, path) {
 # Delta logic
 # ---------------------------------------------------------------------------
 
-# `snapshot$new_cases` (despite the name, inherited from the PBI table's own
-# column) is actually PDOH's cumulative case count for that county+outbreak,
-# not a "new today" figure — see parse_cases(). Below, it's used both to
-# detect each outbreak's delta and, directly, as `cumulative_outbreak_cases`
-# (known_n + delta always equals it exactly, so no separate tracking needed).
-# `cumulative_cases`, in contrast, tracks each county's running total across
-# the whole year (both outbreaks combined), so it's accumulated locally
-# instead — see county_year_totals_from_tsv().
-county_totals_from_tsv <- function(existing, outbreak_num) {
-  existing |>
-    filter(outbreak == outbreak_num) |>
-    group_by(county) |>
-    summarise(known_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
-}
-
-# Each county's running case total across both outbreaks combined, as of
-# `existing` — the starting point `cumulative_cases` accumulates from in
-# build_new_rows().
-county_year_totals_from_tsv <- function(existing) {
-  existing |>
-    group_by(county) |>
-    summarise(year_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
-}
-
+# `snapshot` is PDOH's year-to-date case total per county (see
+# parse_cases()). A county gets a new row whenever that total is higher than
+# the sum of its `new_cases` already on record.
 build_new_rows <- function(snapshot, existing) {
   today <- as.character(Sys.Date())
-  new_rows <- list()
 
-  year_totals <- county_year_totals_from_tsv(existing)
-  year_total_lookup <- setNames(as.list(year_totals$year_total), year_totals$county)
+  known <- existing |>
+    group_by(county) |>
+    summarise(known_total = sum(new_cases, na.rm = TRUE), .groups = "drop")
 
-  for (i in seq_len(nrow(snapshot))) {
-    ob     <- snapshot$outbreak[i]
-    county <- snapshot$county[i]
-    snap_n <- snapshot$new_cases[i]
+  rows <- snapshot |>
+    left_join(known, by = "county") |>
+    mutate(
+      known_total = coalesce(known_total, 0L),
+      delta       = cumulative_cases - known_total
+    )
 
-    totals    <- county_totals_from_tsv(existing, ob)
-    known_row <- totals |> filter(county == !!county)
-    known_n   <- if (nrow(known_row) == 0) 0L else known_row$known_total
-
-    delta <- snap_n - known_n
-
-    if (delta > 0) {
-      message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
-
-      # Accumulate locally (rather than re-reading `existing`) so that if the
-      # same county gets a new row for each outbreak within this same run,
-      # the second row's cumulative total reflects the first.
-      prior_year_total <- if (is.null(year_total_lookup[[county]])) 0L else year_total_lookup[[county]]
-      year_total <- prior_year_total + delta
-      year_total_lookup[[county]] <- year_total
-
-      new_rows[[length(new_rows) + 1]] <- tibble(
-        date                      = today,
-        county                    = county,
-        new_cases                 = delta,
-        cumulative_cases          = year_total,
-        cumulative_outbreak_cases = snap_n,
-        source                    = "Scrape of PDOH measles webpage",
-        outbreak                  = ob
-      )
-    } else if (delta < 0) {
-      warning(sprintf(
-        "ANOMALY: DOH total for %s County (outbreak %d) decreased from %d to %d — skipping",
-        county, ob, known_n, snap_n
-      ))
-    } else {
-      message(sprintf("No change: %s County (outbreak %d)", county, ob))
-    }
+  for (i in which(rows$delta < 0)) {
+    warning(sprintf(
+      "ANOMALY: DOH total for %s County decreased from %d to %d — skipping",
+      rows$county[i], rows$known_total[i], rows$cumulative_cases[i]
+    ))
   }
 
-  if (length(new_rows) == 0) return(NULL)
-  bind_rows(new_rows)
+  new_rows <- rows |>
+    filter(delta > 0) |>
+    transmute(
+      date             = today,
+      county,
+      new_cases        = delta,
+      cumulative_cases,
+      source           = "Scrape of PDOH measles webpage"
+    )
+  for (i in seq_len(nrow(new_rows))) {
+    message(sprintf("NEW: +%d case(s) in %s County", new_rows$new_cases[i], new_rows$county[i]))
+  }
+
+  if (nrow(new_rows) == 0) return(NULL)
+  new_rows
 }
 
 # Each group's known total is its most recently recorded `cumulative_cases`
@@ -1283,97 +1181,6 @@ build_new_age_group_rows <- function(snapshot, existing) {
 
   if (length(new_rows) == 0) return(NULL)
   bind_rows(new_rows)
-}
-
-# ---------------------------------------------------------------------------
-# Update the standalone embed HTML files (cases-by-year-embed.html,
-# map-by-outbreak-embed.html, map-combined-embed.html, weekly-trend-embed.html)
-# — each is a self-contained page meant to be hosted at a
-# stable URL and iframed into the CMS. Rather than a dashboard reading a
-# shared data.json at runtime, every embed keeps its data inlined as JS
-# constants between a pair of marker comments, and this scraper rewrites
-# just that block in place on every run — so each embed stays a single,
-# fully self-contained file with nothing else to fetch or cache. See README.
-# ---------------------------------------------------------------------------
-
-# Replace the JS between the "/* SCRAPER-DATA-START */" and
-# "/* SCRAPER-DATA-END */" markers in an embed file with freshly generated
-# lines, leaving the surrounding markup/styling/chart code untouched.
-inject_embed_data <- function(path, js_lines) {
-  lines     <- readLines(path, warn = FALSE)
-  start_idx <- which(str_detect(lines, fixed("SCRAPER-DATA-START")))
-  end_idx   <- which(str_detect(lines, fixed("SCRAPER-DATA-END")))
-
-  if (length(start_idx) != 1 || length(end_idx) != 1 || end_idx <= start_idx) {
-    stop("Could not find a single SCRAPER-DATA marker pair in '", path, "'")
-  }
-
-  updated <- c(lines[seq_len(start_idx)], js_lines, lines[end_idx:length(lines)])
-  writeLines(updated, path)
-  message("Updated embed data in '", path, "'")
-}
-
-# Per-county ob1/ob2/total, mirroring the map's caseData shape.
-compute_case_data <- function(daily_df) {
-  daily_df |>
-    group_by(county, outbreak) |>
-    summarise(total_cases = sum(new_cases, na.rm = TRUE), .groups = "drop") |>
-    group_by(county) |>
-    summarise(
-      ob1   = sum(total_cases[outbreak == 1], na.rm = TRUE),
-      ob2   = sum(total_cases[outbreak == 2], na.rm = TRUE),
-      total = sum(total_cases, na.rm = TRUE),
-      .groups = "drop"
-    ) |>
-    arrange(county)
-}
-
-update_bar_embed <- function(total_cases, path) {
-  inject_embed_data(path, sprintf("  const totalCases = %d;", total_cases))
-}
-
-update_map_embed <- function(case_data, total_cases, current_ob, prior_ob, last_updated, path) {
-  entries <- sprintf(
-    '  "%s": { ob1: %d, ob2: %d }',
-    case_data$county, case_data$ob1, case_data$ob2
-  )
-  entries[-length(entries)] <- paste0(entries[-length(entries)], ",")
-
-  js_lines <- c(
-    sprintf("  const totalCases = %d;", total_cases),
-    sprintf("  const currentOb = %d;", current_ob),
-    sprintf("  const priorOb = %d;", prior_ob),
-    sprintf('  const lastUpdated = "%s";', last_updated),
-    "  const caseData = {",
-    entries,
-    "  };"
-  )
-  inject_embed_data(path, js_lines)
-}
-
-update_total_map_embed <- function(case_data, total_cases, last_updated, path) {
-  entries <- sprintf('  "%s": %d', case_data$county, case_data$total)
-  entries[-length(entries)] <- paste0(entries[-length(entries)], ",")
-
-  js_lines <- c(
-    sprintf("  const totalCases = %d;", total_cases),
-    sprintf('  const lastUpdated = "%s";', last_updated),
-    "  const caseData = {",
-    entries,
-    "  };"
-  )
-  inject_embed_data(path, js_lines)
-}
-
-update_weekly_embed <- function(weekly, path) {
-  entries <- sprintf(
-    '    { week_start: "%s", new_cases: %d, cumulative_cases: %d },',
-    weekly$week_start, coalesce(weekly$new_cases, 0L), weekly$cumulative_cases
-  )
-  entries[length(entries)] <- str_remove(entries[length(entries)], ",$")
-
-  js_lines <- c("  const weeklyData = [", entries, "  ];")
-  inject_embed_data(path, js_lines)
 }
 
 # ---------------------------------------------------------------------------
@@ -1443,39 +1250,6 @@ tryCatch({
   }, error = function(e) {
     message("WARNING: Age-group case update failed — ", conditionMessage(e))
   })
-
-  # Skip updating any embed whose file isn't present, rather than failing
-  # the run — keeps this resilient if an embed is ever removed or renamed.
-  embed_paths <- c(BAR_EMBED_HTML, MAP_EMBED_HTML, MAP_TOTAL_EMBED_HTML, WEEKLY_EMBED_HTML)
-  if (any(file.exists(embed_paths))) {
-    case_data        <- compute_case_data(updated)
-    total_cases      <- sum(case_data$total)
-    current_outbreak <- sum(case_data$ob2)
-    prior_outbreak   <- sum(case_data$ob1)
-    last_updated     <- format(Sys.Date(), "%b %e, %Y") |> trimws()
-
-    if (file.exists(BAR_EMBED_HTML)) {
-      update_bar_embed(total_cases, BAR_EMBED_HTML)
-    }
-    if (file.exists(MAP_EMBED_HTML)) {
-      update_map_embed(case_data, total_cases, current_outbreak, prior_outbreak, last_updated, MAP_EMBED_HTML)
-    }
-    if (file.exists(MAP_TOTAL_EMBED_HTML)) {
-      update_total_map_embed(case_data, total_cases, last_updated, MAP_TOTAL_EMBED_HTML)
-    }
-
-    weekly_for_embed <- weekly_tsv |>
-      arrange(week_start) |>
-      mutate(cumulative_cases = cumsum(coalesce(new_cases, 0L)))
-    if (file.exists(WEEKLY_EMBED_HTML)) {
-      update_weekly_embed(weekly_for_embed, WEEKLY_EMBED_HTML)
-    }
-
-    message(sprintf(
-      "Updated embeds — %d total cases across %d counties (as of %s)",
-      total_cases, nrow(filter(case_data, total > 0)), last_updated
-    ))
-  }
 },
 error = function(e) {
   message("ERROR: Scrape job failed: ", conditionMessage(e))

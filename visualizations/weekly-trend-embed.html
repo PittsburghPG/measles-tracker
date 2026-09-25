@@ -14,7 +14,7 @@
  * Font: Roboto (fallback Arial/sans-serif). Body/annotation/label text
  * capped at two sizes — 14px primary (near-black), 12px secondary (gray).
  * Regular weight for body text; bold reserved for titles and emphasis.
- * Sentence case throughout. See measles_scraper.R comments for source.
+ * Sentence case throughout.
  */
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -67,8 +67,8 @@
 <body>
 
 <div id="pg-measles-weekly">
-  <h2 class="pg-weekly-hed">Measles cases continue to mount as outbreak intensifies</h2>
-  <p class="pg-weekly-chatter">In the last week, the Pennsylvania Department of Health reported nearly 100 new infections, bringing the annual total to 676 — the highest in the nation.</p>
+  <h2 class="pg-weekly-hed">TK</h2>
+  <p class="pg-weekly-chatter">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
   <div style="position:relative">
     <svg id="pg-weekly-svg" style="width:100%;display:block"></svg>
   </div>
@@ -155,11 +155,19 @@ function draw() {
     .attr('width', totalW)
     .attr('height', totalH);
 
+  // Soft red fill under the line, fading out toward the x-axis — pure
+  // flourish, so it's kept low-opacity enough not to compete with the
+  // line/dots as the chart's primary read.
+  const gradient = svg.append('defs').append('linearGradient')
+    .attr('id', 'pg-weekly-area-gradient')
+    .attr('x1', '0').attr('y1', '0').attr('x2', '0').attr('y2', '1');
+  gradient.append('stop').attr('offset', '0%').attr('stop-color', '#a93226').attr('stop-opacity', 0.32);
+  gradient.append('stop').attr('offset', '100%').attr('stop-color', '#a93226').attr('stop-opacity', 0.02);
+
   const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
   // x-axis is a real time scale (not a category band) so weeks with no
-  // data — like the gap between the January and April outbreaks — show
-  // up as empty space instead of being squeezed out.
+  // data show up as empty space instead of being squeezed out.
   const parseWeek = s => new Date(s + 'T12:00:00Z');
   const msPerWeek = 7 * 24 * 60 * 60 * 1000;
   const weekDates = weeklyData.map(d => parseWeek(d.week_start));
@@ -168,10 +176,6 @@ function draw() {
 
   const x = d3.scaleTime().domain([domainStart, domainEnd]).range([0, w]);
 
-  // Pixel width of one week at the current scale, used to size/center bars.
-  const weekPx = w * msPerWeek / (domainEnd - domainStart);
-  const barWidth = weekPx * 0.65;
-  const barX = d => x(parseWeek(d.week_start)) - barWidth / 2;
   const centerX = d => x(parseWeek(d.week_start));
 
   const maxY = d3.max(weeklyData, d => d.cumulative_cases);
@@ -209,10 +213,8 @@ function draw() {
   // divider line than the weekly ticks, to visually separate months —
   // matching the reference chart's look.
   // A raw calendar month-start rarely lines up with a week boundary, so
-  // snapping a divider there would cut straight through whichever bar
-  // happens to sit at that date. Instead, each divider is placed at the
-  // midpoint between the two weeks it falls between — which is exactly
-  // where the natural gap between two adjacent bars already is.
+  // each divider is placed at the midpoint between the two weeks it falls
+  // between, keeping it clear of the weekly tick marks.
   const boundaryBetweenWeeks = target => {
     for (let i = 0; i < weekDates.length - 1; i++) {
       if (weekDates[i] <= target && target < weekDates[i + 1]) {
@@ -222,19 +224,26 @@ function draw() {
     return target < weekDates[0] ? weekDates[0] : weekDates[weekDates.length - 1];
   };
 
-  const monthSpans = [];
+  const monthList = [];
   const monthBoundaries = [];
   let curMonth = new Date(Date.UTC(domainStart.getUTCFullYear(), domainStart.getUTCMonth(), 1));
   let isFirstMonth = true;
   while (curMonth < domainEnd) {
     if (!isFirstMonth) monthBoundaries.push(boundaryBetweenWeeks(curMonth));
     isFirstMonth = false;
-    const nextMonth = new Date(Date.UTC(curMonth.getUTCFullYear(), curMonth.getUTCMonth() + 1, 1));
-    const spanStart = curMonth < domainStart ? domainStart : curMonth;
-    const spanEnd = nextMonth > domainEnd ? domainEnd : nextMonth;
-    monthSpans.push({ month: curMonth.getUTCMonth(), center: new Date((spanStart.getTime() + spanEnd.getTime()) / 2) });
-    curMonth = nextMonth;
+    monthList.push(curMonth.getUTCMonth());
+    curMonth = new Date(Date.UTC(curMonth.getUTCFullYear(), curMonth.getUTCMonth() + 1, 1));
   }
+
+  // Each month's label centers between the same divider lines drawn below
+  // (week-midpoint boundaries), not the raw calendar month edges — those
+  // rarely match, and centering on the calendar edges was pushing a
+  // partial first/last month's label visibly off from its own span.
+  const monthEdges = [domainStart, ...monthBoundaries, domainEnd];
+  const monthSpans = monthList.map((month, i) => ({
+    month,
+    center: new Date((monthEdges[i].getTime() + monthEdges[i + 1].getTime()) / 2)
+  }));
 
   g.selectAll('.month-boundary').data(monthBoundaries).join('line')
     .attr('class', 'month-boundary')
@@ -278,35 +287,16 @@ function draw() {
     monthNodes.forEach((node, i) => { if (!keep.has(i)) d3.select(node).remove(); });
   }
 
-  // Bars — weekly new cases
-  g.selectAll('.wbar').data(weeklyData).join('rect')
-    .attr('class', 'wbar')
-    .attr('x', barX).attr('y', d => y(d.new_cases))
-    .attr('width', barWidth).attr('height', d => h - y(d.new_cases))
-    .attr('fill', '#a93226').attr('opacity', 0.75)
-    .style('cursor', 'pointer')
-    .on('mouseover', function (event, d) {
-      tip.innerHTML = `<strong>Week of ${fmtWeek(parseWeek(d.week_start))}</strong><br>${d.new_cases} case${d.new_cases !== 1 ? 's' : ''} reported<br>${d.cumulative_cases} cumulative`;
-      tip.style.display = 'block';
-      positionTip(event);
-    })
-    .on('mousemove', positionTip)
-    .on('mouseout', function () {
-      tip.style.display = 'none';
-    });
+  // Area fill under the cumulative line, down to the x-axis.
+  const area = d3.area()
+    .x(centerX)
+    .y0(h)
+    .y1(d => y(d.cumulative_cases))
+    .curve(d3.curveMonotoneX);
 
-  // Bar value label — only the most recent week's, since it's the
-  // chart's headline number. Older bars are still readable via tooltip.
-  const mostRecent = weeklyData[weeklyData.length - 1];
-  if (mostRecent.new_cases > 0) {
-    g.selectAll('.wbar-label').data([mostRecent]).join('text')
-      .attr('class', 'wbar-label')
-      .attr('x', centerX)
-      .attr('y', d => y(d.new_cases) - 4)
-      .attr('text-anchor', 'middle')
-      .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#a93226').attr('font-weight', '700')
-      .text(d => d.new_cases);
-  }
+  g.append('path').datum(weeklyData)
+    .attr('fill', 'url(#pg-weekly-area-gradient)')
+    .attr('d', area);
 
   // Cumulative line
   const line = d3.line()
@@ -315,7 +305,7 @@ function draw() {
     .curve(d3.curveMonotoneX);
 
   g.append('path').datum(weeklyData)
-    .attr('fill', 'none').attr('stroke', '#1a1a1a').attr('stroke-width', 2)
+    .attr('fill', 'none').attr('stroke', '#a93226').attr('stroke-width', 2)
     .attr('d', line);
 
   // Dots on cumulative line
@@ -323,7 +313,7 @@ function draw() {
     .attr('class', 'wdot')
     .attr('cx', centerX)
     .attr('cy', d => y(d.cumulative_cases))
-    .attr('r', 3).attr('fill', '#1a1a1a');
+    .attr('r', 3).attr('fill', '#a93226');
 
   // Larger invisible hit targets on the dots — a 3px dot is too small to
   // hover reliably, so the tooltip trigger is an 8px transparent circle
@@ -350,17 +340,15 @@ function draw() {
     .attr('x', centerX(last) + 6)
     .attr('y', y(last.cumulative_cases) + 4)
     .attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px')
-    .attr('font-weight', '700').attr('fill', '#1a1a1a')
+    .attr('font-weight', '700').attr('fill', '#a93226')
     .text(last.cumulative_cases);
 
   // Legend — aligned to x=0 (the SVG's left edge), matching the head/chatter
   // text above it, rather than the plot area's margin.left inset.
   const legend = svg.append('g').attr('transform', 'translate(0, 6)');
-  legend.append('rect').attr('width', 10).attr('height', 10).attr('y', 1).attr('fill', '#a93226').attr('opacity', 0.75);
-  legend.append('text').attr('x', 14).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Weekly new cases');
-  legend.append('line').attr('x1', 120).attr('x2', 132).attr('y1', 6).attr('y2', 6).attr('stroke', '#1a1a1a').attr('stroke-width', 2);
-  legend.append('circle').attr('cx', 126).attr('cy', 6).attr('r', 3).attr('fill', '#1a1a1a');
-  legend.append('text').attr('x', 136).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Cumulative cases');
+  legend.append('line').attr('x1', 0).attr('x2', 12).attr('y1', 6).attr('y2', 6).attr('stroke', '#a93226').attr('stroke-width', 2);
+  legend.append('circle').attr('cx', 6).attr('cy', 6).attr('r', 3).attr('fill', '#a93226');
+  legend.append('text').attr('x', 16).attr('y', 10).attr('font-family', "'Roboto', Arial, sans-serif").attr('font-size', '12px').attr('fill', '#555').text('Cumulative cases');
 }
 
 // Tells the parent frame our true content height, in case it's set up
