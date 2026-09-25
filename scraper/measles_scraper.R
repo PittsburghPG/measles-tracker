@@ -1192,7 +1192,6 @@ build_new_rows <- function(snapshot, existing) {
 
   year_totals <- county_year_totals_from_tsv(existing)
   year_total_lookup <- setNames(as.list(year_totals$year_total), year_totals$county)
-  current_outbreak  <- outbreak_for_date(today)
 
   for (i in seq_len(nrow(snapshot))) {
     ob     <- snapshot$outbreak[i]
@@ -1205,15 +1204,7 @@ build_new_rows <- function(snapshot, existing) {
 
     delta <- snap_n - known_n
 
-    if (delta > 0 && ob != current_outbreak) {
-      # A row dated today would be counted toward the current outbreak, not
-      # this one, so this delta would be re-added on every run. Flag it for a
-      # hand fix instead.
-      warning(sprintf(
-        "ANOMALY: +%d case(s) in %s County reported for past outbreak %d — skipping; add by hand with a date inside that outbreak",
-        delta, county, ob
-      ))
-    } else if (delta > 0) {
+    if (delta > 0) {
       message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
 
       # Accumulate locally (rather than re-reading `existing`) so that if the
