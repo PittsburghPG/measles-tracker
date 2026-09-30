@@ -92,3 +92,6 @@ date	category	new_hospitalizations	cumulative_hospitalizations
 2026-09-29	total	0	176
 2026-09-29	children	0	56
 2026-09-29	adult	0	120
+2026-09-30	total	0	176
+2026-09-30	children	-1	55
+2026-09-30	adult	1	121
