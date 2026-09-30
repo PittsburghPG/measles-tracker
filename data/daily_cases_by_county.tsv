@@ -310,3 +310,4 @@ date	county	new_cases	cumulative_cases	cumulative_outbreak_cases	source	outbreak
 2026-09-30	Mifflin	10	116	116	Scrape of PDOH measles webpage	2
 2026-09-30	Union	1	18	18	Scrape of PDOH measles webpage	2
 2026-09-30	York	1	33	33	Scrape of PDOH measles webpage	2
+2026-09-30	Snyder	-1	41	41	Scrape of PDOH measles webpage	2

@@ -1085,12 +1085,13 @@ save_summary_tsv <- function(df, path) {
 # today's "total" category row (if any) supplies the hospitalization
 # figures.
 update_daily_summary <- function(summary_df, today, case_daily_df, hosp_df) {
-  today_new_cases <- case_daily_df |> filter(date == today) |> pull(new_cases) |> sum(na.rm = TRUE)
+  today_case_rows <- case_daily_df |> filter(date == today)
+  today_new_cases <- sum(today_case_rows$new_cases, na.rm = TRUE)
   today_hosp    <- hosp_df |> filter(date == today, category == "total")
   new_hosp_today <- if (nrow(today_hosp) > 0) today_hosp$new_hospitalizations[1] else NA_integer_
   hosp_changed  <- !is.na(new_hosp_today) && new_hosp_today != 0
 
-  if (today_new_cases == 0 && !hosp_changed) {
+  if (nrow(today_case_rows) == 0 && !hosp_changed) {
     message("No case or hospitalization change today — summary_daily.tsv unchanged")
     return(summary_df)
   }
@@ -1199,8 +1200,18 @@ build_new_rows <- function(snapshot, existing) {
 
     delta <- snap_n - known_n
 
-    if (delta > 0) {
-      message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
+    # PDOH occasionally lowers a county's total (a case reclassified to
+    # another county or state, or ruled out). Record that as a negative row
+    # so our totals keep matching PDOH's instead of drifting above them.
+    if (delta != 0) {
+      if (delta > 0) {
+        message(sprintf("NEW: +%d case(s) in %s County (outbreak %d)", delta, county, ob))
+      } else {
+        warning(sprintf(
+          "DECREASE: DOH total for %s County (outbreak %d) dropped from %d to %d — recording %d",
+          county, ob, known_n, snap_n, delta
+        ))
+      }
 
       # Accumulate locally (rather than re-reading `existing`) so that if the
       # same county gets a new row for each outbreak within this same run,
@@ -1218,11 +1229,6 @@ build_new_rows <- function(snapshot, existing) {
         source                    = "Scrape of PDOH measles webpage",
         outbreak                  = ob
       )
-    } else if (delta < 0) {
-      warning(sprintf(
-        "ANOMALY: DOH total for %s County (outbreak %d) decreased from %d to %d — skipping",
-        county, ob, known_n, snap_n
-      ))
     } else {
       message(sprintf("No change: %s County (outbreak %d)", county, ob))
     }
@@ -1259,11 +1265,17 @@ build_new_age_group_rows <- function(snapshot, existing) {
 
     delta <- cum_n - known_n
 
-    if (delta > 0) {
+    # Decreases are recorded as negative rows, as in build_new_rows().
+    if (delta != 0) {
       if (first_seen) {
         message(sprintf("NEW GROUP: %s starts at %d case(s)", grp, cum_n))
-      } else {
+      } else if (delta > 0) {
         message(sprintf("NEW: +%d case(s) in age group %s", delta, grp))
+      } else {
+        warning(sprintf(
+          "DECREASE: cumulative case count for age group %s dropped from %d to %d — recording %d",
+          grp, known_n, cum_n, delta
+        ))
       }
       new_rows[[length(new_rows) + 1]] <- tibble(
         date             = today,
@@ -1271,11 +1283,6 @@ build_new_age_group_rows <- function(snapshot, existing) {
         new_cases        = if (first_seen) NA_integer_ else delta,
         cumulative_cases = cum_n
       )
-    } else if (delta < 0) {
-      warning(sprintf(
-        "ANOMALY: cumulative case count for age group %s decreased from %d to %d — skipping",
-        grp, known_n, cum_n
-      ))
     } else {
       message(sprintf("No change: age group %s", grp))
     }
