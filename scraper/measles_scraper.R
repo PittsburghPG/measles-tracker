@@ -33,6 +33,7 @@ WEEKLY_TSV          <- "data/summary_weekly.tsv"
 AGE_GROUP_TSV       <- "data/daily_cases_by_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/daily_hospitalization_by_age_group.tsv"
 SUMMARY_TSV         <- "data/summary_daily.tsv"
+EPICURVE_TSV        <- "data/weekly_cases_by_onset.tsv"
 TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
@@ -792,26 +793,23 @@ find_age_group_visual <- function(exploration) {
   NULL
 }
 
-# Decode a DSR's DM0 row set into (category, count) pairs, resolving the
-# dictionary-encoded category column against ValueDicts. Unlike
-# decode_dsr_rows() (used for the county tables), this also handles the "Ø"
-# bitmask Power BI uses to mark a column's value as null on a given row
-# (rather than merely repeated from the row above, which is what "R" means)
-# — the age-group chart requests every bucket via ShowItemsWithNoData, so a
-# bucket with zero matching cases comes back with a null count instead of an
-# explicit 0.
-decode_dsr_categorical <- function(dsr) {
-  ds <- dsr$DS[[1]]
+# Decode a DSR's DM0 row set into a list of rows (each a list of raw column
+# values). Unlike decode_dsr_rows() (used for the county tables), this also
+# handles the "Ø" bitmask Power BI uses to mark a column's value as null on a
+# given row (rather than merely repeated from the row above, which is what
+# "R" means) — the age-group chart requests every bucket via
+# ShowItemsWithNoData, so a bucket with zero matching cases comes back with a
+# null count instead of an explicit 0.
+decode_dsr_dm0 <- function(dsr) {
   dm0 <- NULL
-  for (ph in ds$PH) {
+  for (ph in dsr$DS[[1]]$PH) {
     if (!is.null(ph$DM0)) { dm0 <- ph$DM0; break }
   }
   if (is.null(dm0)) stop("Power BI query returned no rows (DM0 missing)")
 
-  col_meta <- dm0[[1]]$S
-  n_cols   <- length(col_meta)
-  prev     <- vector("list", n_cols)
-  rows     <- vector("list", length(dm0))
+  n_cols <- length(dm0[[1]]$S)
+  prev   <- vector("list", n_cols)
+  rows   <- vector("list", length(dm0))
 
   for (i in seq_along(dm0)) {
     item      <- dm0[[i]]
@@ -835,6 +833,18 @@ decode_dsr_categorical <- function(dsr) {
     rows[[i]] <- row_vals
   }
 
+  list(col_meta = dm0[[1]]$S, rows = rows)
+}
+
+# Decode a DSR's DM0 row set into (category, count) pairs, resolving the
+# dictionary-encoded category column against ValueDicts.
+decode_dsr_categorical <- function(dsr) {
+  ds       <- dsr$DS[[1]]
+  decoded  <- decode_dsr_dm0(dsr)
+  col_meta <- decoded$col_meta
+  rows     <- decoded$rows
+  n_cols   <- length(col_meta)
+
   dict_col    <- which(!vapply(col_meta, function(s) is.null(s$DN), logical(1)))[1]
   dict_values <- ds$ValueDicts[[col_meta[[dict_col]]$DN]]
   value_col   <- setdiff(seq_len(n_cols), dict_col)[1]
@@ -856,6 +866,64 @@ fetch_age_group_snapshot <- function(ctx) {
     )
   }
   decode_dsr_categorical(query_pbi_visual(ctx, vc)) |> rename(age_group = category)
+}
+
+# ---------------------------------------------------------------------------
+# Epidemic curve — statewide weekly cases by week of rash onset (as opposed
+# to summary_weekly.tsv, which buckets cases by the day PDOH reported them).
+# PDOH revises past weeks as onset dates come in, so each run replaces the
+# whole file with the dashboard's current curve rather than appending to it.
+# ---------------------------------------------------------------------------
+
+# The "Epidemic Curve" tab's columnChart selects Min(<epicurve>.Onset Week)
+# and Sum(<epicurve>.COUNT); return the visual plus the positions of those
+# two columns in its query's Select (which is also their order in the DSR).
+find_epicurve_visual <- function(exploration) {
+  for (section in exploration$sections) {
+    for (vc in section$visualContainers) {
+      query_json <- tryCatch(fromJSON(vc$query, simplifyVector = FALSE), error = function(e) NULL)
+      select <- query_json$Commands[[1]]$SemanticQueryDataShapeCommand$Query$Select
+      if (is.null(select)) next
+
+      agg_prop <- vapply(select, function(s) {
+        prop <- tryCatch(s$Aggregation$Expression$Column$Property, error = function(e) NULL)
+        if (is.null(prop)) NA_character_ else prop
+      }, character(1))
+      week_col  <- which(agg_prop == "Onset Week")[1]
+      count_col <- which(agg_prop == "COUNT")[1]
+      if (!is.na(week_col) && !is.na(count_col)) {
+        return(list(vc = vc, week_col = week_col, count_col = count_col))
+      }
+    }
+  }
+  NULL
+}
+
+# Weekly case counts by onset week, through the current week. The chart's
+# date axis runs to the end of the year, so drop weeks that haven't started.
+fetch_epicurve <- function(ctx) {
+  found <- find_epicurve_visual(ctx$exploration)
+  if (is.null(found)) {
+    stop(
+      "No 'Epidemic Curve' chart found in the Power BI report. ",
+      "The dashboard layout may have changed — check the embed or update fetch_epicurve()."
+    )
+  }
+
+  rows <- decode_dsr_dm0(query_pbi_visual(ctx, found$vc))$rows
+  week_ms <- vapply(rows, function(r) as.numeric(r[[found$week_col]]), numeric(1))
+  counts  <- vapply(rows, function(r) {
+    v <- r[[found$count_col]]
+    if (is.null(v) || is.na(v)) 0L else as.integer(v)
+  }, integer(1))
+
+  tibble(
+    week_start = as.Date(as.POSIXct(week_ms / 1000, origin = "1970-01-01", tz = "UTC")),
+    new_cases  = counts
+  ) |>
+    filter(week_start <= Sys.Date()) |>
+    arrange(week_start) |>
+    mutate(cumulative_cases = cumsum(new_cases))
 }
 
 # ---------------------------------------------------------------------------
@@ -1457,6 +1525,18 @@ tryCatch({
     }
   }, error = function(e) {
     message("WARNING: Age-group case update failed — ", conditionMessage(e))
+  })
+
+  # Epidemic curve (cases by onset week) is likewise non-fatal.
+  tryCatch({
+    epicurve <- fetch_epicurve(pbi_ctx)
+    write_tsv(mutate(epicurve, week_start = as.character(week_start)), EPICURVE_TSV, na = "")
+    message(
+      "Saved ", nrow(epicurve), " onset week(s) to '", EPICURVE_TSV, "' (",
+      sum(epicurve$new_cases), " cases with a known onset date)"
+    )
+  }, error = function(e) {
+    message("WARNING: Epidemic curve update failed — ", conditionMessage(e))
   })
 
   # Skip updating any embed whose file isn't present, rather than failing
