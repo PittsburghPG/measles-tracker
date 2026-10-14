@@ -12,6 +12,7 @@ A scheduled job runs every day at 5:05pm ET:
 4. It also updates `daily_cases_by_age_group.tsv`: PDOH's dashboard only exposes a statewide year-to-date cumulative case count broken out by age group (not by day), so each run compares each age group's cumulative total (`cumulative_cases`) to what's already recorded and, for any group that changed, adds a row for the change (`new_cases`)
 5. It also updates `daily_hospitalization_by_age_group.tsv`: PDOH's Hospitalization tab exposes a statewide running total broken out into three cards — total, under 18 ("children"), and 18+ ("adult") — but not by day or county, so each run adds one row per category, recording that category's total as `cumulative_hospitalizations` and working out `new_hospitalizations` by diffing it against that category's most recent prior day's cumulative total on record
 6. It also updates `summary_daily.tsv`: statewide totals only — `new_cases`/`cumulative_cases` rolled up across all counties, plus that day's `new_hospitalizations`/`cumulative_hospitalizations` from the "total" category above — so you can see where things stand at a glance without wading through the per-county or per-category files. A row is only added on a day PDOH actually reported a change in cases or hospitalizations; a day with neither isn't a real data point, just PDOH not having published an update yet. `cumulative_cases` is recomputed from scratch each run as the sum of every `new_cases` ever recorded in `daily_cases_by_county.tsv`, so it can't drift out of sync
+7. It also replaces `weekly_cases_by_onset.tsv` with the current numbers from the Epidemic Curve tab of PDOH's dashboard: statewide cases grouped by the week (starting Monday) the patient's rash began, not the day PDOH reported the case. `summary_weekly.tsv` groups cases by report date instead, so the two show different curves. PDOH revises past weeks as it learns onset dates, so each run rewrites the whole file rather than adding rows; past versions are in the git history. The most recent weeks will usually rise as later-reported cases get assigned to them
 
 You can also run it manually: **Actions → Scrape → Run workflow**
 
@@ -26,7 +27,8 @@ measles-tracker/
 │   ├── daily_cases_by_age_group.tsv
 │   ├── daily_hospitalization_by_age_group.tsv
 │   ├── summary_daily.tsv
-│   └── summary_weekly.tsv
+│   ├── summary_weekly.tsv
+│   └── weekly_cases_by_onset.tsv
 └── .github/
     └── workflows/
         └── scrape.yml
