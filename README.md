@@ -4,7 +4,7 @@ This project checks the Pennsylvania Department of Health's (PDOH) website every
 
 ## How it works
 
-A scheduled job runs every day at 5:05pm ET. Files starting with `reported_` or `summary_reported_` count cases by the date PDOH reported them; files starting with `summary_onset_` count them by the date the patient's rash began.
+A scheduled job runs every day at 5:05pm ET. Files starting with `reported_` or `summary_reported_` count cases by the date PDOH reported them; files starting with `onset_` count them by the date the patient's rash began.
 
 1. The scraper checks PDOH's measles page and compares the numbers it finds there to what's already saved in `reported_daily_cases_by_county.tsv`
 2. If a county's case count changed, it adds a new row to `reported_daily_cases_by_county.tsv` for that change, recording that county's running case total for the year (across both outbreaks) as `cumulative_cases` and its running total for that outbreak alone as `cumulative_outbreak_cases`
@@ -12,8 +12,8 @@ A scheduled job runs every day at 5:05pm ET. Files starting with `reported_` or 
 4. It also updates `reported_daily_cases_by_age_group.tsv`: PDOH's dashboard only exposes a statewide year-to-date cumulative case count broken out by age group (not by day), so each run compares each age group's cumulative total (`cumulative_cases`) to what's already recorded and, for any group that changed, adds a row for the change (`new_cases`)
 5. It also updates `reported_hospitalization_by_age_group.tsv`: PDOH's Hospitalization tab exposes a statewide running total broken out into three cards — total, under 18 ("children"), and 18+ ("adult") — but not by day or county, so each run adds one row per category, recording that category's total as `cumulative_hospitalizations` and working out `new_hospitalizations` by diffing it against that category's most recent prior day's cumulative total on record
 6. It also updates `summary_reported_daily.tsv`: statewide totals only — `new_cases`/`cumulative_cases` rolled up across all counties, plus that day's `new_hospitalizations`/`cumulative_hospitalizations` from the "total" category above — so you can see where things stand at a glance without wading through the per-county or per-category files. A row is only added on a day PDOH actually reported a change in cases or hospitalizations; a day with neither isn't a real data point, just PDOH not having published an update yet. `cumulative_cases` is recomputed from scratch each run as the sum of every `new_cases` ever recorded in `reported_daily_cases_by_county.tsv`, so it can't drift out of sync
-7. It also replaces `summary_onset_weekly.tsv` with the current numbers from the Epidemic Curve tab of PDOH's dashboard: statewide cases grouped by the week (starting Monday) the patient's rash began, not the day PDOH reported the case. `summary_reported_weekly.tsv` groups cases by report date instead, so the two show different curves. PDOH revises past weeks as it learns onset dates, so each run rewrites the whole file rather than adding rows; past versions are in the git history. The most recent weeks will usually rise as later-reported cases get assigned to them
-8. It also updates `summary_onset_daily.tsv`, which shows which onset weeks each day's newly reported cases fell into. Each run compares every onset week's count to the last one recorded and, for any week that changed, adds a row with that week (`week_start`), its current count (`cumulative_cases`) and the change (`new_cases`). Tracking started October 14, 2026; those first rows leave `new_cases` blank because they record where each week already stood, not new cases
+7. It also replaces `onset_weekly.tsv` with the current numbers from the Epidemic Curve tab of PDOH's dashboard: statewide cases grouped by the week (starting Monday) the patient's rash began, not the day PDOH reported the case. `summary_reported_weekly.tsv` groups cases by report date instead, so the two show different curves. PDOH revises past weeks as it learns onset dates, so each run rewrites the whole file rather than adding rows; past versions are in the git history. The most recent weeks will usually rise as later-reported cases get assigned to them
+8. It also updates `onset_daily.tsv`, which shows which onset weeks each day's newly reported cases fell into. Each run compares every onset week's count to the last one recorded and, for any week that changed, adds a row with that week (`week_start`), its current count (`cumulative_cases`) and the change (`new_cases`). Tracking started October 14, 2026; those first rows leave `new_cases` blank because they record where each week already stood, not new cases
 
 You can also run it manually: **Actions → Scrape → Run workflow**
 
@@ -29,8 +29,8 @@ measles-tracker/
 │   ├── reported_hospitalization_by_age_group.tsv
 │   ├── summary_reported_daily.tsv
 │   ├── summary_reported_weekly.tsv
-│   ├── summary_onset_daily.tsv
-│   └── summary_onset_weekly.tsv
+│   ├── onset_daily.tsv
+│   └── onset_weekly.tsv
 └── .github/
     └── workflows/
         └── scrape.yml

@@ -33,8 +33,8 @@ WEEKLY_TSV          <- "data/summary_reported_weekly.tsv"
 AGE_GROUP_TSV       <- "data/reported_daily_cases_by_age_group.tsv"
 DAILY_HOSP_TSV      <- "data/reported_hospitalization_by_age_group.tsv"
 SUMMARY_TSV         <- "data/summary_reported_daily.tsv"
-EPICURVE_TSV        <- "data/summary_onset_weekly.tsv"
-ONSET_DAILY_TSV     <- "data/summary_onset_daily.tsv"
+EPICURVE_TSV        <- "data/onset_weekly.tsv"
+ONSET_DAILY_TSV     <- "data/onset_daily.tsv"
 TSV_COLS            <- c("date", "county", "new_cases", "cumulative_cases", "cumulative_outbreak_cases", "source", "outbreak")
 BAR_EMBED_HTML      <- "visualizations/cases-by-year-embed.html"
 MAP_EMBED_HTML      <- "visualizations/map-by-outbreak-embed.html"
@@ -927,7 +927,7 @@ fetch_epicurve <- function(ctx) {
     mutate(cumulative_cases = cumsum(new_cases))
 }
 
-# summary_onset_daily.tsv: one row per day an onset week's case count
+# onset_daily.tsv: one row per day an onset week's case count
 # changed, i.e. which onset weeks each day's newly reported cases landed in.
 # `cumulative_cases` is that week's count on the dashboard as of `date`;
 # `new_cases` is the change from the week's previous recorded count. The
