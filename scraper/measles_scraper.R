@@ -114,15 +114,23 @@ extract_pbi_embed_url <- function(html) {
   page   <- read_html(html)
   iframe <- page |> html_element("iframe[src*='powerbigov.us'], iframe[src*='powerbi.com']")
 
-  if (inherits(iframe, "xml_missing") || is.na(iframe)) {
+  if (!inherits(iframe, "xml_missing") && !is.na(iframe)) {
+    src <- html_attr(iframe, "src")
+    message("Found Power BI embed: ", src)
+    return(src)
+  }
+
+  # DOH now leaves the iframe src empty and sets it from a <script>, so fall
+  # back to the first Power BI report URL anywhere in the raw page source.
+  src <- str_extract(html, "https://app\\.powerbi(gov\\.us|\\.com)/view\\?r=[A-Za-z0-9_=%-]+")
+  if (is.na(src)) {
     stop(
       "No embedded Power BI dashboard found on the DOH page. ",
       "The page structure may have changed — check the URL or update parse_cases()."
     )
   }
 
-  src <- html_attr(iframe, "src")
-  message("Found Power BI embed: ", src)
+  message("Found Power BI URL in page source: ", src)
   src
 }
 
