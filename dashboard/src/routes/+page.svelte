@@ -1,0 +1,189 @@
+<script>
+	import MapChart from '$lib/MapChart.svelte';
+	import WeeklyTrendChart from '$lib/WeeklyTrendChart.svelte';
+
+	let { data } = $props();
+
+	// Age-group codes as they appear in cases_by_age_group.tsv, spelled out
+	// for the stat card — the raw codes (e.g. "0-4") read ambiguously
+	// out of context.
+	const AGE_GROUP_LABELS = {
+		'0-4': '0 to 4',
+		'5-9': '5 to 9',
+		'10-17': '10 to 17',
+		'18-24': '18 to 24',
+		'25-49': '25 to 49',
+		'50-64': '50 to 64',
+		'65+': '65 and older',
+		Unk: 'Unknown age'
+	};
+
+	const lastUpdatedFormatted = new Date(data.lastUpdated + 'T00:00:00Z').toLocaleDateString('en-US', {
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		timeZone: 'UTC'
+	});
+
+	// PDOH's dashboard doesn't expose a deaths count the scraper can walk —
+	// this is hand-entered from their public reporting and needs updating by
+	// hand if that changes.
+	const DEATHS_NOTE =
+		'The Pennsylvania Department of Health has reported that two individuals died after contracting measles in August. Later reporting identified the individuals as two infants — a newborn who suffered a splenic rupture and a six-week-old born with a genetic disorder.';
+
+	// Editorial context for the statewide chart, not derivable from the
+	// scraped data — hand-maintained alongside DEATHS_NOTE above.
+	const CASE_CHART_ANNOTATIONS = [
+		{
+			date: '2026-01-30',
+			text: 'A dozen infections were reported in an outbreak that started in late-January and ended weeks later.'
+		},
+		{
+			date: '2026-04-23',
+			text: 'The current outbreak started in late April when health officials identified a cluster of cases in Lebanon County.'
+		}
+	];
+</script>
+
+<svelte:head>
+	<title>PA measles tracker</title>
+</svelte:head>
+
+<header class="page-header">
+	<h1>Pennsylvania measles tracker</h1>
+	<p class="updated">Last updated {lastUpdatedFormatted}</p>
+</header>
+
+<div class="cards">
+	<div class="card">
+		<div class="card-total">{data.totalCases}</div>
+		<div class="card-label">Total cases</div>
+		<div class="breakdown-heading">By age group:</div>
+		<ul class="breakdown">
+			{#each data.ageBreakdown as group (group.age_group)}
+				<li><span>{AGE_GROUP_LABELS[group.age_group] ?? group.age_group}</span><span>{group.cases}</span></li>
+			{/each}
+		</ul>
+	</div>
+
+	<div class="card">
+		<div class="card-total">{data.hospitalization.total}</div>
+		<div class="card-label">Total hospitalizations</div>
+		<div class="breakdown-heading">By age group:</div>
+		<ul class="breakdown">
+			<li><span>Children (under 18)</span><span>{data.hospitalization.children}</span></li>
+			<li><span>Adult (18+)</span><span>{data.hospitalization.adult}</span></li>
+		</ul>
+	</div>
+
+	<div class="card">
+		<div class="card-total">2</div>
+		<div class="card-label">Deaths</div>
+		<p class="card-note">{DEATHS_NOTE}</p>
+	</div>
+</div>
+
+<MapChart totals={data.totals} />
+
+<hr class="divider" />
+
+<section class="weekly">
+	<h2>Cases over time</h2>
+	<WeeklyTrendChart data={data.weeklyCases} unitLabel="case" annotations={CASE_CHART_ANNOTATIONS} />
+</section>
+
+<style>
+	.page-header {
+		text-align: center;
+		margin-bottom: 28px;
+	}
+
+	h1 {
+		font-size: 26px;
+		margin-bottom: 6px;
+	}
+
+	.updated {
+		color: #555;
+		font-size: 13px;
+	}
+
+	.cards {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 20px;
+		margin-bottom: 28px;
+	}
+
+	.card {
+		flex: 1 1 220px;
+		min-width: 0;
+		border: 1px solid #eee;
+		border-radius: 8px;
+		padding: 16px 20px;
+	}
+
+	.card-total {
+		font-size: 32px;
+		font-weight: 700;
+		line-height: 1.1;
+	}
+
+	.card-label {
+		font-size: 13px;
+		color: #555;
+		margin-bottom: 10px;
+	}
+
+	.breakdown-heading {
+		padding-top: 10px;
+		border-top: 1px solid #eee;
+		font-size: 12px;
+		font-weight: 700;
+		color: #555;
+		margin-bottom: 4px;
+	}
+
+	.breakdown {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		font-size: 13px;
+	}
+
+	.breakdown li {
+		display: flex;
+		justify-content: space-between;
+		padding: 2px 0;
+		color: #333;
+	}
+
+	.breakdown li span:last-child {
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+
+	.card-note {
+		margin: 0;
+		padding: 10px 0 0;
+		border-top: 1px solid #eee;
+		font-size: 13px;
+		line-height: 1.5;
+		color: #333;
+	}
+
+	.divider {
+		border: none;
+		border-top: 1px solid #eee;
+		margin: 28px 0 0;
+	}
+
+	.weekly {
+		margin-top: 28px;
+	}
+
+	.weekly h2 {
+		font-size: 15px;
+		margin-bottom: 10px;
+	}
+</style>
