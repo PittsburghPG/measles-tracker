@@ -257,16 +257,18 @@ function draw() {
     .text(d => apMonths[d.month]);
 
   // Safety pass: drop a month label if it would still collide with a
-  // kept neighbor (rare with ~4 weeks between months, but a narrow
-  // embed could squeeze two adjacent short months together). First and
+  // kept neighbor — needs a bigger minimum gap on narrow (mobile) widths
+  // than a fixed 4px, which let labels sit close enough to read as
+  // squished together even when technically non-overlapping. First and
   // last are always kept.
+  const MIN_LABEL_GAP = 10;
   const monthNodes = monthLabels.nodes();
   if (monthNodes.length > 0) {
     const keep = new Set([0, monthNodes.length - 1]);
     let lastRight = monthNodes[0].getBBox().x + monthNodes[0].getBBox().width;
     for (let i = 1; i < monthNodes.length - 1; i++) {
       const bbox = monthNodes[i].getBBox();
-      if (bbox.x > lastRight + 4) {
+      if (bbox.x > lastRight + MIN_LABEL_GAP) {
         keep.add(i);
         lastRight = bbox.x + bbox.width;
       }
@@ -275,7 +277,7 @@ function draw() {
     for (let i = monthNodes.length - 2; i > 0; i--) {
       if (!keep.has(i)) continue;
       const bbox = monthNodes[i].getBBox();
-      if (bbox.x + bbox.width > lastBBox.x - 4) {
+      if (bbox.x + bbox.width > lastBBox.x - MIN_LABEL_GAP) {
         keep.delete(i);
       } else {
         break;
